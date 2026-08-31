@@ -7,36 +7,11 @@
  * need to use are documented accordingly near the end.
  */
 import { initTRPC, TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
 import superjson from "superjson";
 import { ZodError } from "zod";
-import { AUTH_COOKIE_NAME, verifyAuthToken } from "~/server/auth/jwt";
-import { db } from "~/server/db";
-import { users } from "~/server/db/schema";
+import { resolveAuthedUser } from "~/server/auth/session";
 
-function readCookie(headers: Headers, name: string): string | null {
-  const raw = headers.get("cookie");
-  if (!raw) {
-    return null;
-  }
-  for (const part of raw.split(";")) {
-    const eq_ = part.indexOf("=");
-    if (eq_ === -1) {
-      continue;
-    }
-    const key = part.slice(0, eq_).trim();
-    if (key === name) {
-      return decodeURIComponent(part.slice(eq_ + 1).trim());
-    }
-  }
-  return null;
-}
-
-export interface AuthedUser {
-  email: string;
-  id: number;
-  role: string;
-}
+export type { AuthedUser } from "~/server/auth/session";
 
 /**
  * 1. CONTEXT
@@ -50,35 +25,12 @@ export interface AuthedUser {
  *
  * @see https://trpc.io/docs/server/context
  *
- * Resolves the logged-in user (if any) from the httpOnly auth cookie, mirroring
- * the old app's `authMiddleware`: verifies the JWT, then re-checks `status`/
- * `token_version` against the live DB on every request (role is deliberately
- * NOT trusted from the JWT — see `requireRole` callers below — so that a role
- * change or forced logout via `token_version` takes effect immediately).
+ * Resolves the logged-in user (if any) from the httpOnly auth cookie via
+ * `resolveAuthedUser` — the same resolution the plain PDF/email Route Handlers
+ * use, so both surfaces enforce identical session/role rules.
  */
 export const createTRPCContext = async (opts: { headers: Headers }) => {
-  const token = readCookie(opts.headers, AUTH_COOKIE_NAME);
-  const payload = token ? verifyAuthToken(token) : null;
-
-  let user: AuthedUser | null = null;
-  if (payload) {
-    const dbUser = await db.query.users.findFirst({
-      where: eq(users.id, payload.id),
-    });
-    const isRevoked =
-      !dbUser ||
-      dbUser.status === "suspended" ||
-      dbUser.status === "deleted" ||
-      (payload.tv ?? 1) !== (dbUser.tokenVersion ?? 1);
-    if (dbUser && !isRevoked) {
-      user = {
-        id: dbUser.id,
-        email: dbUser.email,
-        role: dbUser.role ?? "user",
-      };
-    }
-  }
-
+  const user = await resolveAuthedUser(opts.headers);
   return { ...opts, user };
 };
 
