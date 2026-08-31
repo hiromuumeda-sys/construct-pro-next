@@ -104,7 +104,7 @@ function ProjectsContent() {
 
   const [statusFilter, setStatusFilter] = useState("all");
   const [keyword, setKeyword] = useState(searchParams.get("q") ?? "");
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editing, setEditing] = useState<Project | null>(null);
   const [form, setForm] = useState<EditFormState>(EMPTY_FORM);
   const [creating, setCreating] = useState(false);
   const [createForm, setCreateForm] = useState<EditFormState>(EMPTY_FORM);
@@ -148,7 +148,7 @@ function ProjectsContent() {
     onSuccess: async () => {
       await invalidate();
       toast.success("案件を更新しました");
-      setEditingId(null);
+      setEditing(null);
     },
     onError: (err) => {
       if (err.data?.code === "CONFLICT") {
@@ -163,7 +163,7 @@ function ProjectsContent() {
     onSuccess: async () => {
       await invalidate();
       toast.success("案件を削除しました");
-      setEditingId(null);
+      setEditing(null);
     },
     onError: () => toast.error("削除に失敗しました"),
   });
@@ -172,7 +172,7 @@ function ProjectsContent() {
       onSuccess: async (data) => {
         await invalidate();
         toast.success(`新しい案件ID「${data.projectNo}」として複製しました`);
-        setEditingId(null);
+        setEditing(null);
       },
       onError: (err) => toast.error(err.message || "複製に失敗しました"),
     });
@@ -190,7 +190,7 @@ function ProjectsContent() {
     if (p.status === "オーダー移行") {
       return;
     }
-    setEditingId(p.id);
+    setEditing(p);
     setForm(toEditForm(p));
   };
 
@@ -416,8 +416,8 @@ function ProjectsContent() {
       </Dialog>
 
       <Dialog
-        onOpenChange={(open) => !open && setEditingId(null)}
-        open={editingId !== null}
+        onOpenChange={(open) => !open && setEditing(null)}
+        open={editing !== null}
       >
         <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -428,7 +428,7 @@ function ProjectsContent() {
             <Button
               disabled={deleteMutation.isPending}
               onClick={() =>
-                editingId !== null && deleteMutation.mutate({ id: editingId })
+                editing && deleteMutation.mutate({ id: editing.id })
               }
               variant="destructive"
             >
@@ -440,9 +440,8 @@ function ProjectsContent() {
                 changeDeliveryMonthMutation.isPending
               }
               onClick={() => {
-                const p = filtered.find((row) => row.id === editingId);
-                if (p) {
-                  submitEdit(p);
+                if (editing) {
+                  submitEdit(editing);
                 }
               }}
             >
@@ -486,6 +485,7 @@ function ProjectsContent() {
                   amount: form.amount ? Number(form.amount) : null,
                   startDate: form.startDate,
                   endDate: form.endDate,
+                  status: form.status,
                   notes: form.notes,
                 });
                 setPendingDeliveryChange(null);
@@ -619,6 +619,17 @@ function EstimateModal({
     "いつもお世話になっております。\nお見積書を添付いたします。ご確認のほどよろしくお願いいたします。"
   );
   const [sending, setSending] = useState(false);
+  const { data: allOrders } = api.orders.list.useQuery();
+
+  // buildEstimatePDF（server/pdf/document.ts）と同じ集計方法：見積額は
+  // 案件配下の各発注の estimate ?? planned ?? decided ?? 0 の合計（customItems未指定時）。
+  // project.amount（契約金額）は別概念であり、これを表示すると実際にダウンロード/送信
+  // されるPDFの金額と食い違う。
+  const subtotal = (allOrders ?? [])
+    .filter((o) => o.projectId === project.id)
+    .reduce((s, o) => s + (o.estimate ?? o.planned ?? o.decided ?? 0), 0);
+  const tax = Math.floor(subtotal * 0.1);
+  const total = subtotal + tax;
 
   const download = () => {
     window.open(`/api/estimate/project/${project.id}`, "_blank");
@@ -666,11 +677,7 @@ function EstimateModal({
           <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
             <p>案件: {project.name}</p>
             <p>宛先: {project.clientCompany || project.client}</p>
-            <p>
-              御見積金額: ¥
-              {Math.floor((project.amount ?? 0) * 1.1).toLocaleString()}
-              （税込）
-            </p>
+            <p>御見積金額: ¥{total.toLocaleString()}（税込）</p>
           </div>
         </div>
         {showEmailForm ? (

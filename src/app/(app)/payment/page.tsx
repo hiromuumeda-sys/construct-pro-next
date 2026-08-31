@@ -1,7 +1,7 @@
 "use client";
 
 import { History, Plus } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -464,14 +464,19 @@ function PaymentRegisterDialog({
 
   const remaining = order ? (order.remaining ?? order.decided ?? 0) : 0;
 
-  const openChange = (open: boolean) => {
-    if (open) {
+  // Dialog は open を親から渡されるだけの完全制御コンポーネントであり、親が
+  // order をセットして programmatic に open=true へ切り替えても Radix の
+  // onOpenChange は発火しない（内部の閉じる操作にのみ反応するため）。
+  // そのため、行を切り替えて開き直したときにフォームをリセットするには
+  // order の変化を直接監視する必要がある。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the target order changes (by id), not on every background refetch of `order` (a new object each time orders.list refetches)
+  useEffect(() => {
+    if (order) {
       setAmount("");
       setPaidDate(new Date().toISOString().slice(0, 10));
       setNote("");
     }
-    onOpenChange(open);
-  };
+  }, [order?.id]);
 
   const submit = () => {
     if (!order) {
@@ -491,7 +496,7 @@ function PaymentRegisterDialog({
   };
 
   return (
-    <Dialog onOpenChange={openChange} open={order !== null}>
+    <Dialog onOpenChange={onOpenChange} open={order !== null}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>支払登録</DialogTitle>

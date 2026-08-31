@@ -4,7 +4,13 @@ import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { diffChanges, logAudit } from "~/server/audit/log";
 import { db } from "~/server/db";
-import { orders, projectFiles, projects, receipts } from "~/server/db/schema";
+import {
+  invoices,
+  orders,
+  projectFiles,
+  projects,
+  receipts,
+} from "~/server/db/schema";
 import { nextProjectNoTx } from "~/server/projects/project-no";
 
 const nonNegAmount = z.number().nonnegative().nullish();
@@ -24,6 +30,18 @@ const projectUpsertShape = {
 };
 
 const ORDERED_STATUS = "オーダー移行";
+
+/**
+ * undefined（未送信）なら既存値を維持、null（明示的にクリア）ならクリアする。
+ * `??` だと undefined/null を区別できず、金額欄を空にして保存してもクリアされない
+ * バグになるため、null許容フィールドはこのヘルパーで区別する。
+ */
+function keepOrClear<T>(
+  value: T | null | undefined,
+  before: T | null
+): T | null {
+  return value === undefined ? before : value;
+}
 
 export const projectsRouter = createTRPCRouter({
   list: protectedProcedure.query(async () => {
@@ -155,7 +173,7 @@ export const projectsRouter = createTRPCRouter({
           clientPhone: input.clientPhone ?? before.clientPhone,
           clientEmail: input.clientEmail ?? before.clientEmail,
           clientAddress: input.clientAddress ?? before.clientAddress,
-          amount: input.amount ?? before.amount,
+          amount: keepOrClear(input.amount, before.amount),
           startDate: input.startDate ?? before.startDate,
           endDate: input.endDate ?? before.endDate,
           status: input.status ?? before.status,
@@ -190,6 +208,7 @@ export const projectsRouter = createTRPCRouter({
         amount: nonNegAmount,
         startDate: z.string().nullish(),
         endDate: z.string().nullish(),
+        status: z.string().nullish(),
         notes: z.string().nullish(),
       })
     )
@@ -222,10 +241,10 @@ export const projectsRouter = createTRPCRouter({
               clientPhone: before.clientPhone,
               clientEmail: before.clientEmail,
               clientAddress: before.clientAddress,
-              amount: input.amount ?? before.amount,
+              amount: keepOrClear(input.amount, before.amount),
               startDate: input.startDate ?? before.startDate,
               endDate: input.endDate ?? before.endDate,
-              status: before.status,
+              status: input.status ?? before.status,
               notes: input.notes ?? before.notes,
               deliveryMonth: input.deliveryMonth,
               projectNo: projectNoValue,
@@ -247,6 +266,14 @@ export const projectsRouter = createTRPCRouter({
             .update(receipts)
             .set({ projectId: row.id })
             .where(eq(receipts.projectId, input.id));
+          await tx
+            .update(invoices)
+            .set({ projectId: row.id })
+            .where(eq(invoices.projectId, input.id));
+          await tx
+            .update(projectFiles)
+            .set({ projectId: row.id })
+            .where(eq(projectFiles.projectId, input.id));
 
           return { id: row.id, projectNo: projectNoValue };
         }
@@ -302,7 +329,7 @@ export const projectsRouter = createTRPCRouter({
         .update(projects)
         .set({ receiptStatus: input.value })
         .where(eq(projects.id, input.id));
-      await logAudit(ctx.user.id, "UPDATE", "receipts", input.id, {
+      await logAudit(ctx.user.id, "UPDATE", "projects", input.id, {
         name: before.name,
         changes: [`入金ステータスを ${prev} → ${input.value} に変更`],
       });
@@ -322,7 +349,7 @@ export const projectsRouter = createTRPCRouter({
         .update(projects)
         .set({ receiptNotes: input.value })
         .where(eq(projects.id, input.id));
-      await logAudit(ctx.user.id, "UPDATE", "receipts", input.id, {
+      await logAudit(ctx.user.id, "UPDATE", "projects", input.id, {
         name: before.name,
         changes: [
           `備考を ${before.receiptNotes || "(空)"} → ${input.value || "(空)"} に変更`,

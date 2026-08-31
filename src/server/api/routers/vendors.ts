@@ -19,6 +19,18 @@ function maskVendorBank<T extends { bankNumber: string | null }>(v: T): T {
   return { ...v, bankNumber: `****${v.bankNumber.slice(-4)}` };
 }
 
+/**
+ * undefined（未送信）なら既存値を維持、null（明示的にクリア）ならクリアする。
+ * `??` だと undefined/null を区別できず、資本金を0や空にして保存してもクリア
+ * されないバグになるため、null許容フィールドはこのヘルパーで区別する。
+ */
+function keepOrClear<T>(
+  value: T | null | undefined,
+  before: T | null
+): T | null {
+  return value === undefined ? before : value;
+}
+
 const vendorUpsertShape = {
   company: z.string().min(1),
   dept: z.string().nullish(),
@@ -90,7 +102,7 @@ export const vendorsRouter = createTRPCRouter({
           bankType: input.bankType || "",
           bankNumber: input.bankNumber || "",
           bankHolder: input.bankHolder || "",
-          capital: input.capital || null,
+          capital: input.capital ?? null,
           companyScale: input.companyScale || null,
           website: input.website || null,
         })
@@ -140,9 +152,9 @@ export const vendorsRouter = createTRPCRouter({
           bankType: input.bankType ?? before.bankType ?? "",
           bankNumber: input.bankNumber ?? before.bankNumber ?? "",
           bankHolder: input.bankHolder ?? before.bankHolder ?? "",
-          capital: input.capital ?? before.capital ?? null,
-          companyScale: input.companyScale ?? before.companyScale ?? null,
-          website: input.website ?? before.website ?? null,
+          capital: keepOrClear(input.capital, before.capital),
+          companyScale: keepOrClear(input.companyScale, before.companyScale),
+          website: keepOrClear(input.website, before.website),
         })
         .where(eq(vendors.id, input.id))
         .returning();

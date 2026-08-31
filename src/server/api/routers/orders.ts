@@ -41,15 +41,27 @@ const orderUpdateInput = z.object({
 type OrderUpdateInput = z.infer<typeof orderUpdateInput>;
 type OrderRow = typeof orders.$inferSelect;
 
+/**
+ * undefined（未送信）なら既存値を維持、null（明示的にクリア）ならクリアする。
+ * `??` だと undefined/null を区別できず、金額欄を空にして保存してもクリアされない
+ * バグになるため、null許容フィールドはこのヘルパーで区別する。
+ */
+function keepOrClear<T>(
+  value: T | null | undefined,
+  before: T | null
+): T | null {
+  return value === undefined ? before : value;
+}
+
 /** 未送信の項目は既存値を維持する（部分更新のマージ）。status/orderNo/versionは呼び出し元で別途設定する。 */
 function mergeOrderFields(input: OrderUpdateInput, before: OrderRow) {
   return {
     projectId: input.projectId ?? before.projectId,
     category: input.category ?? before.category,
     vendor: input.vendor ?? before.vendor,
-    estimate: input.estimate ?? before.estimate,
-    planned: input.planned ?? before.planned,
-    decided: input.decided ?? before.decided,
+    estimate: keepOrClear(input.estimate, before.estimate),
+    planned: keepOrClear(input.planned, before.planned),
+    decided: keepOrClear(input.decided, before.decided),
     details: input.details ?? before.details,
     site: input.site ?? before.site,
     periodStart: input.periodStart ?? before.periodStart,

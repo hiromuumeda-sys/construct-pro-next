@@ -40,7 +40,7 @@ export const customersRouter = createTRPCRouter({
           phone: input.phone,
           address: input.address,
           notes: input.notes,
-          capital: input.capital || null,
+          capital: input.capital ?? null,
           companyScale: input.companyScale || null,
           website: input.website || null,
         })
@@ -71,7 +71,7 @@ export const customersRouter = createTRPCRouter({
           phone: input.phone,
           address: input.address,
           notes: input.notes,
-          capital: input.capital || null,
+          capital: input.capital ?? null,
           companyScale: input.companyScale || null,
           website: input.website || null,
         })
