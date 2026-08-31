@@ -1,0 +1,36 @@
+---
+description: Typescriptのlinter，formatterについて
+globs: *.ts, *.tsx
+alwaysApply: false
+---
+# Linter and Formatter
+
+本プロジェクトではLinter、FormatterにBiomeを使っています。
+Biomeで推奨されるルールに違反しないよう実装してください。
+また、ターミナルからBiomeによるformatting、linting、safe fixを使う際は`bun run check:write`を実行してください。
+
+## 特に気をつけるべきルール
+
+特に以下のルールは見落とされやすいので、違反しないように注意してください。
+
+### noForEach
+
+Prefer for...of statement instead of Array.forEach.
+
+### noUnusedVariables
+
+Disallow unused variables.
+
+### useExhaustiveDependencies
+
+Enforce all dependencies are correctly specified in a React hook.
+
+### noExplicitAny
+
+Disallow the any type usage.
+
+The any type in TypeScript is a dangerous “escape hatch” from the type system. Using any disables many type checking rules and is generally best used only as a last resort or when prototyping code.
+
+TypeScript’s --noImplicitAny compiler option prevents an implied any, but doesn’t prevent any from being explicitly used the way this rule does.
+
+Sometimes you can use the type unknown instead of the type any. It also accepts any value, however it requires to check that a property exists before calling it.

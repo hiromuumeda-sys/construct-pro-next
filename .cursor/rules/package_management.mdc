@@ -1,0 +1,23 @@
+---
+description: ターミナルにおけるルール
+globs: 
+alwaysApply: true
+---
+# パッケージ管理について
+
+npmなどではなくbunを利用してください。
+
+npmパッケージを追加する際はnpmと互換性のある以下のコマンドを用いてください。
+
+```bash
+bun add {packages}
+```
+
+## shadcn/uiについて
+
+UIコンポーネントを作成する際はshadcn/uiを積極的に利用してください。
+shadcn/uiでのコンポーネントを追加する際は以下のコマンドを用いてください。
+
+```bash
+bunx --bun shadcn@latest add {components}
+```
