@@ -159,7 +159,7 @@ function paymentDueNotifications(
         title: "支払期日超過",
         message: `${o.vendor} への支払（${o.category}）が${Math.abs(d)}日超過しています`,
         date: o.paymentDate,
-        link: "/payment.html",
+        link: "/payment",
         keyword: String(o.id),
         assignee: o.assignee || null,
       });
@@ -171,7 +171,7 @@ function paymentDueNotifications(
         title: "支払期日接近",
         message: `${o.vendor} への支払（${o.category}）まであと${d}日です`,
         date: o.paymentDate,
-        link: "/payment.html",
+        link: "/payment",
         keyword: String(o.id),
         assignee: o.assignee || null,
       });
@@ -212,7 +212,7 @@ function receiptDueNotificationFor(
       title: "入金期日超過（未入金）",
       message: `${projectLabel}（${inv.invoiceNo}）の入金期日が${Math.abs(d)}日超過・未入金残 ${yen}`,
       date: inv.dueDate,
-      link: "/receipts.html",
+      link: "/receipts",
       keyword,
     };
   }
@@ -224,7 +224,7 @@ function receiptDueNotificationFor(
       title: "入金期日接近",
       message: `${projectLabel}（${inv.invoiceNo}）の入金期日まであと${d}日・未入金残 ${yen}`,
       date: inv.dueDate,
-      link: "/receipts.html",
+      link: "/receipts",
       keyword,
     };
   }
@@ -268,7 +268,7 @@ function missingInvoiceNotifications(
         title: "請求書未発行",
         message: `${p.name} は受注済みですが請求書が未発行です`,
         date: null,
-        link: "/projects.html",
+        link: "/projects",
         keyword: String(p.id),
       });
     }
@@ -309,7 +309,7 @@ function undeliveredOrderNotifications(
         ? `${assignee}さん担当で決定済み・注文書未発行の明細が${cnt}件あります`
         : `担当者未設定で決定済み・注文書未発行の明細が${cnt}件あります`,
       date: null,
-      link: "/orders-list.html",
+      link: "/orders-list",
       keyword: null,
       assignee: assignee || null,
     });
@@ -337,7 +337,7 @@ function contractMissingNotifications(
         title: "契約書未締結",
         message: `${p.name} は着工日を${Math.abs(d)}日超過していますが契約書が未締結です`,
         date: p.startDate,
-        link: "/projects.html",
+        link: "/projects",
         keyword: String(p.id),
       });
     }
