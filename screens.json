@@ -1,6 +1,17 @@
 {
   "screens": [
     {
+      "id": "root-redirect",
+      "route": "/",
+      "name": "ルート（ログインへのリダイレクト）",
+      "required_elements": [
+        "/loginへの即時リダイレクト（旧appのapp.get('/')がlogin.htmlを返す挙動と同じ着地点）"
+      ],
+      "depends_on": [],
+      "source_items": ["screen-login"],
+      "status": "verified"
+    },
+    {
       "id": "login",
       "route": "/login",
       "name": "ログイン／サインアップ画面",
@@ -15,7 +26,7 @@
       ],
       "depends_on": [],
       "source_items": ["screen-login", "auth-session-cookie"],
-      "status": "draft"
+      "status": "verified"
     },
     {
       "id": "account-invite",
@@ -34,7 +45,7 @@
         "email-sending-enablement",
         "rbac-role-model"
       ],
-      "status": "draft"
+      "status": "verified"
     },
     {
       "id": "accept-invite",
@@ -48,7 +59,7 @@
       ],
       "depends_on": [],
       "source_items": ["screen-accept-invite"],
-      "status": "draft"
+      "status": "verified"
     },
     {
       "id": "customers-master",
@@ -62,7 +73,7 @@
       ],
       "depends_on": ["login"],
       "source_items": ["screen-customers-master"],
-      "status": "draft"
+      "status": "verified"
     },
     {
       "id": "categories-master",
@@ -76,7 +87,7 @@
       ],
       "depends_on": ["login"],
       "source_items": ["screen-categories-master"],
-      "status": "draft"
+      "status": "verified"
     },
     {
       "id": "vendors-master",
@@ -90,7 +101,7 @@
       ],
       "depends_on": ["login"],
       "source_items": ["screen-vendors-master"],
-      "status": "draft"
+      "status": "verified"
     },
     {
       "id": "history",
@@ -104,7 +115,7 @@
       ],
       "depends_on": ["login"],
       "source_items": ["screen-history", "audit-logging", "rbac-role-model"],
-      "status": "draft"
+      "status": "verified"
     },
     {
       "id": "receipts",
@@ -128,7 +139,7 @@
         "notification-deep-link",
         "optimistic-locking"
       ],
-      "status": "draft"
+      "status": "verified"
     },
     {
       "id": "payment",
@@ -153,7 +164,7 @@
         "optimistic-locking",
         "rbac-role-model"
       ],
-      "status": "draft"
+      "status": "verified"
     },
     {
       "id": "reporting-dashboard",
@@ -172,7 +183,7 @@
         "pdf-generation",
         "unresolved-notification-read-state"
       ],
-      "status": "draft"
+      "status": "verified"
     },
     {
       "id": "orders-list",
@@ -196,7 +207,7 @@
         "optimistic-locking",
         "notification-deep-link"
       ],
-      "status": "draft"
+      "status": "verified"
     },
     {
       "id": "projects-list",
@@ -224,7 +235,7 @@
         "customer-vendor-string-linkage",
         "current-user-display-fix"
       ],
-      "status": "draft"
+      "status": "verified"
     }
   ]
 }
