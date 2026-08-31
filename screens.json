@@ -1,0 +1,230 @@
+{
+  "screens": [
+    {
+      "id": "login",
+      "route": "/login",
+      "name": "ログイン／サインアップ画面",
+      "required_elements": [
+        "メールアドレス入力",
+        "パスワード入力",
+        "ログインボタン",
+        "サインアップビューへの切替リンク",
+        "お名前入力（サインアップ）",
+        "パスワード確認（サインアップ、8文字以上）",
+        "認証エラー表示（レートリミット超過・停止/削除アカウント別メッセージ）"
+      ],
+      "depends_on": [],
+      "source_items": ["screen-login", "auth-session-cookie"],
+      "status": "draft"
+    },
+    {
+      "id": "account-invite",
+      "route": "/invite",
+      "name": "アカウント発行画面",
+      "required_elements": [
+        "招待発行フォーム（氏名・メールアドレス・権限ラジオ）",
+        "招待送信ボタン（実送信、準備中スタブにしない）",
+        "発行済み招待テーブル（状態・有効期限・取消操作）",
+        "登録済みアカウントテーブル（権限変更・一時停止/有効化・削除操作）",
+        "自分自身の行の操作制限表示"
+      ],
+      "depends_on": ["login"],
+      "source_items": [
+        "screen-account-invite",
+        "email-sending-enablement",
+        "rbac-role-model"
+      ],
+      "status": "draft"
+    },
+    {
+      "id": "accept-invite",
+      "route": "/accept-invite",
+      "name": "アカウント登録（招待受諾）画面",
+      "required_elements": [
+        "招待トークン検証中のローディング表示",
+        "無効な招待の理由別エラー表示とログイン画面への導線",
+        "招待内容の読み取り専用表示（メール・氏名・権限）",
+        "パスワード設定フォーム（8文字以上、確認用と一致必須）"
+      ],
+      "depends_on": [],
+      "source_items": ["screen-accept-invite"],
+      "status": "draft"
+    },
+    {
+      "id": "customers-master",
+      "route": "/customers",
+      "name": "顧客マスタ",
+      "required_elements": [
+        "顧客一覧テーブル（企業名・部門・担当者名・連絡先・資本金・企業規模・サイト）",
+        "キーワード検索",
+        "新規顧客登録モーダル",
+        "編集モーダル（削除ボタン付き）"
+      ],
+      "depends_on": ["login"],
+      "source_items": ["screen-customers-master"],
+      "status": "draft"
+    },
+    {
+      "id": "categories-master",
+      "route": "/categories",
+      "name": "工事区分マスタ",
+      "required_elements": [
+        "工事区分一覧テーブル（コード・名称・表示順・備考）",
+        "キーワード検索",
+        "新規工事区分登録モーダル（コード自動採番・readonly）",
+        "編集モーダル（物理削除ボタン付き）"
+      ],
+      "depends_on": ["login"],
+      "source_items": ["screen-categories-master"],
+      "status": "draft"
+    },
+    {
+      "id": "vendors-master",
+      "route": "/vendors",
+      "name": "発注先マスタ",
+      "required_elements": [
+        "発注先一覧テーブル（会社名・担当者・連絡先・資本金・企業規模・対応工事区分タグ、口座番号は一覧に出さない）",
+        "キーワード検索",
+        "新規発注先登録モーダル（振込先口座情報含む）",
+        "編集モーダル（口座番号フル値を個別取得、削除ボタン付き）"
+      ],
+      "depends_on": ["login"],
+      "source_items": ["screen-vendors-master"],
+      "status": "draft"
+    },
+    {
+      "id": "history",
+      "route": "/history",
+      "name": "履歴詳細（監査ログ）",
+      "required_elements": [
+        "対象画面フィルタ（受注一覧/工事計画/顧客マスタ/発注先マスタ/工事区分マスタ/売上・入金管理/アカウント発行/すべて）",
+        "操作フィルタ（CREATE/UPDATE/DELETE）",
+        "監査ログ一覧テーブル（日時・操作バッジ・対象・変更内容・操作者）",
+        "権限不足時のアクセス拒否（admin/accounting以外）"
+      ],
+      "depends_on": ["login"],
+      "source_items": ["screen-history", "audit-logging", "rbac-role-model"],
+      "status": "draft"
+    },
+    {
+      "id": "receipts",
+      "route": "/receipts",
+      "name": "売上・入金管理",
+      "required_elements": [
+        "案件タブ／案件外タブの切替",
+        "サマリーカード（請負金額合計/入金累計/完成工事未収入金）",
+        "フィルタ（入金ステータス・入金期日範囲）",
+        "案件別入金一覧テーブル（行内インラインのステータス変更・備考編集）",
+        "入金登録モーダル",
+        "消し込み履歴モーダル",
+        "案件外入金/返金の登録・編集モーダル",
+        "CSV出力ボタン",
+        "通知の?qディープリンクによる検索絞り込み"
+      ],
+      "depends_on": ["login"],
+      "source_items": [
+        "screen-receipts",
+        "csv-export",
+        "notification-deep-link",
+        "optimistic-locking"
+      ],
+      "status": "draft"
+    },
+    {
+      "id": "payment",
+      "route": "/payment",
+      "name": "支払管理",
+      "required_elements": [
+        "工事支払タブ／工事外タブの切替",
+        "フィルタ（支払ステータス・支払期日範囲）",
+        "支払一覧テーブル（支払期日超過/接近の強調表示、行内インラインのステータス変更・備考編集）",
+        "支払登録モーダル（1/2払い・1/3払いショートカット付き、admin/accountingのみ操作可）",
+        "支払履歴モーダル",
+        "工事外支払/返金の登録・編集モーダル",
+        "CSV出力ボタン",
+        "通知の?qディープリンクによる検索絞り込み",
+        "ロールに応じた支払登録・取消ボタンの表示制御"
+      ],
+      "depends_on": ["login"],
+      "source_items": [
+        "screen-payment",
+        "csv-export",
+        "notification-deep-link",
+        "optimistic-locking",
+        "rbac-role-model"
+      ],
+      "status": "draft"
+    },
+    {
+      "id": "reporting-dashboard",
+      "route": "/reporting",
+      "name": "レポーティング（ダッシュボード）",
+      "required_elements": [
+        "予実・残高・当月予定タブ（サマリーカード7枚、案件別予実テーブル）",
+        "レポート分析タブ（受注・入金推移グラフ、PDF出力ボタン、顧客別/発注先別・期間/案件別の切替集計）",
+        "企業別発注金額一覧タブ（発注偏りアラート）",
+        "通知ベル（発信元、各画面への?qディープリンク生成）"
+      ],
+      "depends_on": ["login"],
+      "source_items": [
+        "screen-reporting-dashboard",
+        "notification-deep-link",
+        "pdf-generation",
+        "unresolved-notification-read-state"
+      ],
+      "status": "draft"
+    },
+    {
+      "id": "orders-list",
+      "route": "/orders-list",
+      "name": "工事計画",
+      "required_elements": [
+        "案件選択ビュー（`?projectId=`未指定時、フィルタ付き案件一覧）",
+        "工事計画明細ビュー（`?projectId=`指定時、フィルタ・表示項目トグル・サマリーカード4枚）",
+        "工事計画の編集フローティングモーダル（新規登録兼用）",
+        "注文書プレビューモーダル（工事ID自動採番、PDFダウンロード）",
+        "発注確定メール送信パネル（実送信、準備中スタブにしない）",
+        "請書/請求書PDFアップロード・プレビュー・削除",
+        "楽観ロック（409競合時の再読込アラート）",
+        "通知の?qディープリンクによる案件選択ビューの絞り込み"
+      ],
+      "depends_on": ["login", "projects-list"],
+      "source_items": [
+        "screen-orders-list",
+        "email-sending-enablement",
+        "pdf-generation",
+        "optimistic-locking",
+        "notification-deep-link"
+      ],
+      "status": "draft"
+    },
+    {
+      "id": "projects-list",
+      "route": "/projects",
+      "name": "受注一覧",
+      "required_elements": [
+        "案件一覧テーブル（案件ID・工事名・発注元・工期・引渡月・契約金額・状態）",
+        "インライン編集（行クリックで対象行のみ入力欄に切替、保存/キャンセル）",
+        "行内インラインのステータス変更",
+        "新規案件登録モーダル",
+        "見積書プレビューモーダル（品目編集・ダウンロード）",
+        "見積書送信ボタン（実送信、準備中スタブにしない）",
+        "引渡月変更時の案件複製確認ダイアログ（複製後は旧案件をオーダー移行ステータスでロック）",
+        "工事計画へのリンク（`?projectId=`付き）",
+        "楽観ロック（409競合時の再読込アラート）",
+        "通知の?qディープリンクによる検索絞り込み"
+      ],
+      "depends_on": ["login"],
+      "source_items": [
+        "screen-projects-list",
+        "email-sending-enablement",
+        "pdf-generation",
+        "optimistic-locking",
+        "notification-deep-link",
+        "customer-vendor-string-linkage",
+        "current-user-display-fix"
+      ],
+      "status": "draft"
+    }
+  ]
+}
