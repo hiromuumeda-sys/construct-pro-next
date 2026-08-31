@@ -6,9 +6,37 @@
  * TL;DR - This is where all the tRPC server stuff is created and plugged in. The pieces you will
  * need to use are documented accordingly near the end.
  */
-import { initTRPC } from "@trpc/server";
+import { initTRPC, TRPCError } from "@trpc/server";
+import { eq } from "drizzle-orm";
 import superjson from "superjson";
 import { ZodError } from "zod";
+import { AUTH_COOKIE_NAME, verifyAuthToken } from "~/server/auth/jwt";
+import { db } from "~/server/db";
+import { users } from "~/server/db/schema";
+
+function readCookie(headers: Headers, name: string): string | null {
+  const raw = headers.get("cookie");
+  if (!raw) {
+    return null;
+  }
+  for (const part of raw.split(";")) {
+    const eq_ = part.indexOf("=");
+    if (eq_ === -1) {
+      continue;
+    }
+    const key = part.slice(0, eq_).trim();
+    if (key === name) {
+      return decodeURIComponent(part.slice(eq_ + 1).trim());
+    }
+  }
+  return null;
+}
+
+export interface AuthedUser {
+  email: string;
+  id: number;
+  role: string;
+}
 
 /**
  * 1. CONTEXT
@@ -21,10 +49,38 @@ import { ZodError } from "zod";
  * wrap this and provides the required context.
  *
  * @see https://trpc.io/docs/server/context
+ *
+ * Resolves the logged-in user (if any) from the httpOnly auth cookie, mirroring
+ * the old app's `authMiddleware`: verifies the JWT, then re-checks `status`/
+ * `token_version` against the live DB on every request (role is deliberately
+ * NOT trusted from the JWT — see `requireRole` callers below — so that a role
+ * change or forced logout via `token_version` takes effect immediately).
  */
-export const createTRPCContext = (opts: { headers: Headers }) => ({
-  ...opts,
-});
+export const createTRPCContext = async (opts: { headers: Headers }) => {
+  const token = readCookie(opts.headers, AUTH_COOKIE_NAME);
+  const payload = token ? verifyAuthToken(token) : null;
+
+  let user: AuthedUser | null = null;
+  if (payload) {
+    const dbUser = await db.query.users.findFirst({
+      where: eq(users.id, payload.id),
+    });
+    const isRevoked =
+      !dbUser ||
+      dbUser.status === "suspended" ||
+      dbUser.status === "deleted" ||
+      (payload.tv ?? 1) !== (dbUser.tokenVersion ?? 1);
+    if (dbUser && !isRevoked) {
+      user = {
+        id: dbUser.id,
+        email: dbUser.email,
+        role: dbUser.role ?? "user",
+      };
+    }
+  }
+
+  return { ...opts, user };
+};
 
 /**
  * 2. INITIALIZATION
@@ -98,3 +154,50 @@ const timingMiddleware = t.middleware(async ({ next }) => {
  * are logged in.
  */
 export const publicProcedure = t.procedure.use(timingMiddleware);
+
+/**
+ * Protected (authenticated) procedure — equivalent to the old app's `authMiddleware`.
+ * Throws UNAUTHORIZED if `ctx.user` wasn't resolved (missing/invalid/expired cookie,
+ * revoked token_version, or suspended/deleted account — see `createTRPCContext`).
+ */
+const isAuthed = t.middleware(({ ctx, next }) => {
+  if (!ctx.user) {
+    throw new TRPCError({ code: "UNAUTHORIZED" });
+  }
+  return next({ ctx: { ...ctx, user: ctx.user } });
+});
+
+export const protectedProcedure = t.procedure
+  .use(timingMiddleware)
+  .use(isAuthed);
+
+/**
+ * Role-gated procedure — equivalent to the old app's `requireRole([...])`.
+ * Role is re-checked from `ctx.user` (itself freshly loaded from the DB per
+ * request in `createTRPCContext`, not trusted from the JWT), matching the old
+ * app's "role changes take effect immediately" design.
+ */
+function requireRole(allowedRoles: string[]) {
+  return t.middleware(({ ctx, next }) => {
+    if (!ctx.user) {
+      throw new TRPCError({ code: "UNAUTHORIZED" });
+    }
+    if (!allowedRoles.includes(ctx.user.role)) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "このページを閲覧する権限がありません",
+      });
+    }
+    return next({ ctx: { ...ctx, user: ctx.user } });
+  });
+}
+
+export const adminProcedure = t.procedure
+  .use(timingMiddleware)
+  .use(isAuthed)
+  .use(requireRole(["admin"]));
+
+export const accountingOrAdminProcedure = t.procedure
+  .use(timingMiddleware)
+  .use(isAuthed)
+  .use(requireRole(["admin", "accounting"]));
