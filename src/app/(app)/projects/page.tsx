@@ -43,6 +43,8 @@ import {
   TableRow,
 } from "~/components/ui/table";
 import { Textarea } from "~/components/ui/textarea";
+import { PROJECT_STATUS_CLASS, statusClass } from "~/lib/status-styles";
+import { cn } from "~/lib/utils";
 import { api, type RouterOutputs } from "~/trpc/react";
 
 type Project = RouterOutputs["projects"]["list"][number];
@@ -339,7 +341,11 @@ function ProjectsContent() {
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     {locked ? (
-                      <Badge variant="secondary">{p.status}</Badge>
+                      <Badge
+                        className={statusClass(PROJECT_STATUS_CLASS, p.status)}
+                      >
+                        {p.status}
+                      </Badge>
                     ) : (
                       <Select
                         onValueChange={(v) =>
@@ -351,7 +357,12 @@ function ProjectsContent() {
                         }
                         value={p.status ?? "未対応"}
                       >
-                        <SelectTrigger className="w-32">
+                        <SelectTrigger
+                          className={cn(
+                            "w-32 border-transparent",
+                            statusClass(PROJECT_STATUS_CLASS, p.status)
+                          )}
+                        >
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>

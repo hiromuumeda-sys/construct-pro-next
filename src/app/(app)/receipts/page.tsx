@@ -33,6 +33,12 @@ import {
 } from "~/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Textarea } from "~/components/ui/textarea";
+import {
+  RECEIPT_STATUS_CLASS,
+  receiptRowHighlightClass,
+  statusClass,
+} from "~/lib/status-styles";
+import { cn } from "~/lib/utils";
 import { api, type RouterOutputs } from "~/trpc/react";
 
 type SalesRow = RouterOutputs["receipts"]["salesSummary"][number];
@@ -45,18 +51,6 @@ const MISC_TABLE_COLUMN_COUNT = 9;
 
 function yen(n: number | null | undefined) {
   return `¥${(n ?? 0).toLocaleString()}`;
-}
-
-function payStatusBadgeVariant(
-  status: string | null | undefined
-): "default" | "secondary" | "outline" {
-  if (status === "入金済") {
-    return "default";
-  }
-  if (status === "一部入金") {
-    return "secondary";
-  }
-  return "outline";
 }
 
 export default function ReceiptsPage() {
@@ -109,8 +103,10 @@ function ProjectReceiptsTab() {
 
   const [historyProject, setHistoryProject] = useState<SalesRow | null>(null);
   const [registerProject, setRegisterProject] = useState<SalesRow | null>(null);
+  const [detailProject, setDetailProject] = useState<SalesRow | null>(null);
   const [registerForm, setRegisterForm] =
     useState<RegisterForm>(EMPTY_REGISTER_FORM);
+  const [notesDraft, setNotesDraft] = useState<Record<number, string>>({});
 
   const invalidateAll = () =>
     Promise.all([
@@ -134,6 +130,19 @@ function ProjectReceiptsTab() {
     },
     onError: () => toast.error("削除に失敗しました"),
   });
+
+  const updateNotesMutation = api.projects.updateReceiptNotes.useMutation({
+    onSuccess: () => invalidateAll(),
+    onError: () => toast.error("備考の更新に失敗しました"),
+  });
+
+  const handleNotesBlur = (row: SalesRow) => {
+    const draft = notesDraft[row.id];
+    if (draft === undefined || draft === (row.receiptNotes ?? "")) {
+      return;
+    }
+    updateNotesMutation.mutate({ id: row.id, value: draft });
+  };
 
   const filtered = useMemo(() => {
     if (!rows) {
@@ -326,7 +335,14 @@ function ProjectReceiptsTab() {
               </TableRow>
             )}
             {filtered.map((r) => (
-              <TableRow key={r.id}>
+              <TableRow
+                className={cn(
+                  "cursor-pointer",
+                  receiptRowHighlightClass(r.payStatus)
+                )}
+                key={r.id}
+                onClick={() => setDetailProject(r)}
+              >
                 <TableCell className="tabular-nums">
                   {r.projectNo || `#${r.id}`}
                 </TableCell>
@@ -356,14 +372,29 @@ function ProjectReceiptsTab() {
                   {yen(r.advanceReceived)}
                 </TableCell>
                 <TableCell>
-                  <Badge variant={payStatusBadgeVariant(r.payStatus)}>
+                  <Badge
+                    className={statusClass(RECEIPT_STATUS_CLASS, r.payStatus)}
+                  >
                     {r.payStatus}
                   </Badge>
                 </TableCell>
-                <TableCell className="max-w-48 truncate">
-                  {r.receiptNotes || "-"}
+                <TableCell
+                  className="max-w-48"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Input
+                    className="h-8"
+                    onBlur={() => handleNotesBlur(r)}
+                    onChange={(e) =>
+                      setNotesDraft((prev) => ({
+                        ...prev,
+                        [r.id]: e.target.value,
+                      }))
+                    }
+                    value={notesDraft[r.id] ?? r.receiptNotes ?? ""}
+                  />
                 </TableCell>
-                <TableCell>
+                <TableCell onClick={(e) => e.stopPropagation()}>
                   <Button
                     onClick={() => setHistoryProject(r)}
                     size="icon-sm"
@@ -372,7 +403,7 @@ function ProjectReceiptsTab() {
                     <History />
                   </Button>
                 </TableCell>
-                <TableCell>
+                <TableCell onClick={(e) => e.stopPropagation()}>
                   <Button
                     onClick={() => openRegister(r)}
                     size="icon-sm"
@@ -509,6 +540,119 @@ function ProjectReceiptsTab() {
               </TableBody>
             </Table>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        onOpenChange={(open) => !open && setDetailProject(null)}
+        open={detailProject !== null}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>売上・入金 明細</DialogTitle>
+          </DialogHeader>
+          {detailProject && (
+            <div className="flex flex-col gap-4">
+              <div>
+                <p className="text-muted-foreground text-xs">工事名</p>
+                <p className="font-bold">{detailProject.name || "-"}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-muted-foreground text-xs">案件ID</p>
+                  <p className="tabular-nums">
+                    {detailProject.projectNo || `#${detailProject.id}`}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">発注者</p>
+                  <p>{detailProject.client || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">契約</p>
+                  <p>{detailProject.status || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">請求書</p>
+                  <p>{detailProject.invoiceIssued ? "発行済み" : "未発行"}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">未完/入金日</p>
+                  <p>
+                    {detailProject.completed
+                      ? detailProject.lastReceiptDate || "完成"
+                      : "未完"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">
+                    入金ステータス
+                  </p>
+                  <Badge
+                    className={statusClass(
+                      RECEIPT_STATUS_CLASS,
+                      detailProject.payStatus
+                    )}
+                  >
+                    {detailProject.payStatus}
+                  </Badge>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3 border-t pt-3 text-sm">
+                <div>
+                  <p className="text-muted-foreground text-xs">請負金額</p>
+                  <p className="font-bold tabular-nums">
+                    {yen(detailProject.contractAmount)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">入金額累計</p>
+                  <p className="tabular-nums">
+                    {yen(detailProject.cumReceived)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">当月入金額</p>
+                  <p className="tabular-nums">
+                    {yen(detailProject.thisMonthReceived)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">
+                    前月までの入金額
+                  </p>
+                  <p className="tabular-nums">
+                    {yen(detailProject.prevReceived)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">
+                    完成工事未収入金
+                  </p>
+                  <p className="tabular-nums">
+                    {yen(detailProject.completedReceivable)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground text-xs">
+                    未成工事受入金
+                  </p>
+                  <p className="tabular-nums">
+                    {yen(detailProject.advanceReceived)}
+                  </p>
+                </div>
+              </div>
+              <p className="text-muted-foreground text-xs">
+                ※
+                案件情報は「受注一覧」で管理されます。入金登録は一覧の＋ボタンから行えます。
+              </p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setDetailProject(null)} variant="outline">
+              閉じる
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

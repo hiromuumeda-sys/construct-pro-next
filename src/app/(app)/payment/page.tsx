@@ -31,6 +31,8 @@ import {
   TableRow,
 } from "~/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
+import { PAYMENT_STATUS_CLASS, statusClass } from "~/lib/status-styles";
+import { cn } from "~/lib/utils";
 import { api, type RouterOutputs } from "~/trpc/react";
 
 type Order = RouterOutputs["orders"]["list"][number];
@@ -296,7 +298,13 @@ function OrderPaymentsTab() {
                       onValueChange={(v) => handleStatusChange(o, v)}
                       value={o.paymentStatus ?? "未払い"}
                     >
-                      <SelectTrigger className="w-32" size="sm">
+                      <SelectTrigger
+                        className={cn(
+                          "w-32 border-transparent",
+                          statusClass(PAYMENT_STATUS_CLASS, o.paymentStatus)
+                        )}
+                        size="sm"
+                      >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -734,7 +742,10 @@ function MiscPaymentsTab() {
                 <TableCell>{m.paymentDate || "-"}</TableCell>
                 <TableCell>
                   <Badge
-                    variant={m.status === "支払済み" ? "default" : "secondary"}
+                    className={statusClass(
+                      PAYMENT_STATUS_CLASS,
+                      m.status || "未払い"
+                    )}
                   >
                     {m.status || "未払い"}
                   </Badge>

@@ -33,6 +33,12 @@ import {
   TableRow,
 } from "~/components/ui/table";
 import { Textarea } from "~/components/ui/textarea";
+import {
+  ORDER_STATUS_CLASS,
+  PROJECT_STATUS_CLASS,
+  statusClass,
+} from "~/lib/status-styles";
+import { cn } from "~/lib/utils";
 import { api, type RouterOutputs } from "~/trpc/react";
 
 type Order = RouterOutputs["orders"]["list"][number];
@@ -168,7 +174,11 @@ function ProjectSelectView() {
                   {p.startDate || "-"} 〜 {p.endDate || "-"}
                 </TableCell>
                 <TableCell>
-                  <Badge variant="secondary">{p.status || "-"}</Badge>
+                  <Badge
+                    className={statusClass(PROJECT_STATUS_CLASS, p.status)}
+                  >
+                    {p.status || "-"}
+                  </Badge>
                 </TableCell>
               </TableRow>
             ))}
@@ -553,7 +563,12 @@ function OrderDetailView({ projectId }: { projectId: number }) {
                     }
                     value={o.status ?? "未処理"}
                   >
-                    <SelectTrigger className="w-32">
+                    <SelectTrigger
+                      className={cn(
+                        "w-32 border-transparent",
+                        statusClass(ORDER_STATUS_CLASS, o.status)
+                      )}
+                    >
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
