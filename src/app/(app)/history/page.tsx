@@ -31,9 +31,13 @@ const TABLE_NAME_OPTIONS: { value: string; label: string }[] = [
   { value: "invitations", label: "アカウント発行" },
 ];
 
-const TABLE_NAME_LABELS: Record<string, string> = Object.fromEntries(
-  TABLE_NAME_OPTIONS.map((o) => [o.value, o.label])
-);
+// 表示用ラベルはフィルタ選択肢より広い（invoices/usersはフィルタ対象では
+// ないが、種別列の表示は必要。旧app history.html の TABLE_LABEL と同じ）
+const TABLE_NAME_LABELS: Record<string, string> = {
+  ...Object.fromEntries(TABLE_NAME_OPTIONS.map((o) => [o.value, o.label])),
+  invoices: "受注一覧",
+  users: "ログイン",
+};
 
 const ACTION_OPTIONS: { value: string; label: string }[] = [
   { value: "all", label: "すべて" },

@@ -777,12 +777,19 @@ function VendorTab() {
     }
     const from = toDate(periodStart);
     const to = toDate(periodEnd);
+    if (!(from || to)) {
+      return orders;
+    }
     return orders.filter((o: Order) => {
       const d = toDate(o.periodStart);
-      if (from && (!d || d < from)) {
+      // 工事開始日が未設定の注文は絞り込み対象外（除外しない、旧app同挙動）
+      if (!d) {
+        return true;
+      }
+      if (from && d < from) {
         return false;
       }
-      if (to && (!d || d > to)) {
+      if (to && d > to) {
         return false;
       }
       return true;
@@ -794,7 +801,10 @@ function VendorTab() {
     let total = 0;
     for (const o of filtered) {
       const key = o.vendor || "（未設定）";
-      const amount = Number(o.decided) || 0;
+      const amount = Number(o.decided || o.planned || 0);
+      if (!amount) {
+        continue;
+      }
       sums.set(key, (sums.get(key) || 0) + amount);
       total += amount;
     }

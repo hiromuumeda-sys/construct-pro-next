@@ -17,6 +17,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { MonthPicker } from "~/components/shared/month-picker";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -416,7 +417,7 @@ function ProjectsContent() {
               </TableRow>
             )}
             {filtered.map((p) =>
-              editing?.id === p.id ? (
+              editing && editing.id === p.id ? (
                 <ProjectEditRow
                   changeDeliveryMonthPending={
                     changeDeliveryMonthMutation.isPending
@@ -425,9 +426,9 @@ function ProjectsContent() {
                   form={form}
                   key={p.id}
                   onCancel={() => setEditing(null)}
-                  onDelete={() => deleteMutation.mutate({ id: p.id })}
-                  onSave={() => submitEdit(p)}
-                  project={p}
+                  onDelete={() => deleteMutation.mutate({ id: editing.id })}
+                  onSave={() => submitEdit(editing)}
+                  project={editing}
                   savePending={updateMutation.isPending}
                   setForm={setForm}
                 />
@@ -916,10 +917,8 @@ function ProjectEditRow({
         </div>
       </TableCell>
       <TableCell>
-        <Input
-          className="h-8 w-28"
-          onChange={(e) => set("deliveryMonth", e.target.value)}
-          type="month"
+        <MonthPicker
+          onChange={(v) => set("deliveryMonth", v)}
           value={form.deliveryMonth}
         />
       </TableCell>
@@ -1047,9 +1046,8 @@ function ProjectForm({
       </div>
       <div className="flex flex-col gap-2">
         <Label>引渡月 *</Label>
-        <Input
-          onChange={(e) => set("deliveryMonth", e.target.value)}
-          type="month"
+        <MonthPicker
+          onChange={(v) => set("deliveryMonth", v)}
           value={form.deliveryMonth}
         />
       </div>
@@ -1439,12 +1437,15 @@ function InvoiceModal({
 
   const { subtotal, tax, total } = computeTotals(items);
 
-  const persistMutation = api.invoices.create.useMutation();
+  const persistMutation = api.invoices.create.useMutation({
+    onSuccess: () => {
+      persistedInvoiceProjects.add(project.id);
+    },
+  });
   const persistInvoice = () => {
     if (persistedInvoiceProjects.has(project.id)) {
       return;
     }
-    persistedInvoiceProjects.add(project.id);
     persistMutation.mutate({ projectId: project.id });
   };
 

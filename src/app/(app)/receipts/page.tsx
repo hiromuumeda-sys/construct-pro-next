@@ -3,6 +3,7 @@
 import { History, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { MonthPicker } from "~/components/shared/month-picker";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
@@ -590,11 +591,8 @@ function ProjectReceiptsTab() {
             </div>
             <div className="flex flex-col gap-2">
               <Label>対象月度</Label>
-              <Input
-                onChange={(e) =>
-                  setRegisterForm({ ...registerForm, month: e.target.value })
-                }
-                type="month"
+              <MonthPicker
+                onChange={(v) => setRegisterForm({ ...registerForm, month: v })}
                 value={registerForm.month}
               />
             </div>

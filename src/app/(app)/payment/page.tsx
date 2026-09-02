@@ -142,8 +142,11 @@ function matchesPaymentFilters(
   );
 }
 
-function dueDateClass(dateStr: string | null | undefined): string {
-  if (!dateStr) {
+function dueDateClass(
+  dateStr: string | null | undefined,
+  paymentStatus: string | null | undefined
+): string {
+  if (!dateStr || paymentStatus === "支払済み") {
     return "";
   }
   const due = new Date(dateStr);
@@ -697,7 +700,7 @@ function PaymentOrderRow({
       <TableCell className="text-right tabular-nums">
         {money(o.remaining ?? o.decided)}
       </TableCell>
-      <TableCell className={dueDateClass(o.paymentDate)}>
+      <TableCell className={dueDateClass(o.paymentDate, o.paymentStatus)}>
         {o.paymentDate || "-"}
       </TableCell>
       <TableCell onClick={(e) => e.stopPropagation()}>
