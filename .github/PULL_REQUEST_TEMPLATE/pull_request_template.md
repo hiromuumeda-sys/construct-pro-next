@@ -23,7 +23,6 @@
 ## Testing
 <!-- Describe the testing you've performed -->
 - [ ] Unit tests pass (`bun run test`)
-- [ ] E2E tests pass (`bun run test:e2e`)
 - [ ] Code quality checks pass (`bun run check`)
 - [ ] TypeScript compilation succeeds (`bun run typecheck`)
 - [ ] Manual testing completed

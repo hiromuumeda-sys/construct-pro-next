@@ -19,7 +19,7 @@
 - **pdfkit** - 見積書・発注書・請求書のPDF生成
 - **nodemailer** - メール送信（発注書/請求書/見積書の送付フロー）
 - **[Ultracite](https://biomejs.dev/ja/)**（Biomeベース） - Linter/Formatter
-- **[Vitest](https://vitest.dev)** / **[Playwright](https://playwright.dev)** - テスト
+- **[Vitest](https://vitest.dev)** - ユニットテスト
 
 ## ディレクトリ構造
 
@@ -27,7 +27,6 @@
 construct-pro-next/
 ├── __tests__/            # ユニットテストファイル
 ├── docs/                 # プロジェクト文書（ADR、画面仕様等）
-├── e2e/                  # E2Eテストファイル
 ├── public/               # 静的ファイル
 ├── src/
 │   ├── app/              # Next.js App Router（画面・APIルート）
@@ -45,7 +44,6 @@ construct-pro-next/
 
 ```bash
 bun install
-bunx playwright install
 ```
 
 `.env.example` を `.env` にコピーし、`DATABASE_URL` 等を設定した上で:
@@ -62,7 +60,6 @@ bun run build        # 本番ビルド
 bun run start         # 本番サーバー起動
 
 bun run test          # ユニットテスト（Vitest）
-bun run test:e2e      # E2Eテスト（Playwright）
 
 bun run check         # Biomeによるチェック
 bun run check:write   # 自動修正
@@ -82,7 +79,6 @@ bun run typecheck     # TypeScript型チェック
 | `lefthook.yml` | Git hooks設定 |
 | `next.config.js` | Next.js設定 |
 | `drizzle.config.ts` | Drizzle ORM設定 |
-| `playwright.config.ts` | E2Eテスト設定 |
 | `vitest.config.ts` | ユニットテスト設定 |
 
 ## デプロイ

@@ -17,7 +17,6 @@ Same Supabase Postgres instance and schema as the old app (no data migration) â€
 - **Ultracite** - AI-ready code formatter and linter (built on Biome)
 - **Zod** - TypeScript-first schema validation
 - **Vitest** - Fast unit testing framework
-- **Playwright** - Modern E2E testing framework
 - **Shadcn/UI** - Customizable UI components
 - **Drizzle ORM** - `postgres` (postgres.js) driver, `{ prepare: false }` (Supabase pooler is transaction-mode PgBouncer)
 - **pdfkit** - PDF generation (purchase orders, invoices, estimates), Node runtime only
@@ -43,8 +42,6 @@ Same Supabase Postgres instance and schema as the old app (no data migration) â€
 
 ### Testing
 - `bun run test` - Run unit tests with Vitest
-- `bun run test:e2e` - Run E2E tests with Playwright
-- `bunx playwright install` - Install Playwright browsers
 
 ### Git Hooks
 - Git hooks are automatically installed via `bun install` (postinstall script)
@@ -115,11 +112,6 @@ Same Supabase Postgres instance and schema as the old app (no data migration) â€
 - Use `.test.ts` or `.test.tsx` extensions
 - Follow Given-When-Then pattern for test structure
 - Mock external dependencies appropriately using `vi.mock()`
-
-### E2E Testing with Playwright
-- E2E tests should be in `e2e/` directory
-- Test critical user journeys and flows
-- Use page object model for maintainable tests
 
 ### Best Practices
 - Each test should be independent and isolated

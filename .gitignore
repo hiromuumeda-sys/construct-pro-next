@@ -45,12 +45,7 @@ yarn-error.log*
 # idea files
 .idea
 
-# Playwright
-node_modules/
-/test-results/
-/playwright-report/
-/blob-report/
-/playwright/.cache/
+# Playwright MCP server (browser automation)
 .playwright-mcp
 
 # Claude Code

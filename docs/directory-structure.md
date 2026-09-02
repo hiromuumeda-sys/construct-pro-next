@@ -9,7 +9,6 @@ This document outlines the directory structure of the project to help AI agents 
 ├── __tests__/           # Test files mirroring src structure
 │   ├── setup.ts         # Test setup configuration
 │   └── components/      # Component tests
-├── e2e/                 # E2E tests (Playwright specs)
 ├── public/              # Static files served at root path
 │   └── favicon.ico      # Site favicon
 ├── src/                 # Source code
@@ -40,9 +39,9 @@ This document outlines the directory structure of the project to help AI agents 
 │       ├── README.md     # ADR運用ルール
 │       ├── template.md   # ADR作成用テンプレート
 │       └── NNNN-*.md     # 個々のADR（例: 0001-use-bun-as-package-manager.md）
-├── .agents/skills/       # Agent Skillsの実体（各エージェント用ディレクトリからsymlinkでミラー）
+├── .agents/skills/       # Agent Skillsの実体（.claude/skills/ からsymlinkでミラー）
 ├── .claude/              # Claude Code設定（skills/ は .agents/skills/ へのsymlink、agents/, settings.json 等）
-├── .github/              # GitHub設定（Issue/PRテンプレート、Dependabot、Actions、skills/ ミラー）
+├── .github/              # GitHub設定（Issue/PRテンプレート、Dependabot、Actions）
 ├── .next/               # Next.js build output (generated)
 ├── node_modules/        # Dependencies (generated)
 ├── package.json         # Project metadata and dependencies
@@ -50,7 +49,6 @@ This document outlines the directory structure of the project to help AI agents 
 ├── skills-lock.json      # 外部由来スキルの取得元・ハッシュを記録するロックファイル
 ├── tsconfig.json        # TypeScript configuration
 ├── vitest.config.ts     # Vitest configuration for testing
-├── playwright.config.ts # Playwright configuration for E2E testing
 ├── next.config.js       # Next.js configuration
 ├── biome.jsonc           # Biome configuration
 ├── components.json      # shadcn/ui components configuration
@@ -84,7 +82,6 @@ This document outlines the directory structure of the project to help AI agents 
 - **src/server/**: Server-side functionality and API implementations
 - **src/types/**: Shared TypeScript type definitions
 - **__tests__/**: Test files organized to mirror the src directory structure
-- **e2e/**: End-to-End tests using Playwright
 
 ## API Structure
 
@@ -95,5 +92,5 @@ This document outlines the directory structure of the project to help AI agents 
 
 ## Agent Skills & Documentation
 
-- **.agents/skills/**: Agent Skillsの実体（`analyze-codebase`、`brainstorming`、`create-github-issue`、`create-github-pr`、`review-github-pr`、`commit-changes`、`test-driven-development`、`systematic-debugging`、`manage-adr`、`project-kickoff` など）。`.claude/`・`.github/` 配下の `skills/` はここへのsymlinkでミラーされている
+- **.agents/skills/**: Agent Skillsの実体（`analyze-codebase`、`brainstorming`、`create-github-issue`、`create-github-pr`、`review-github-pr`、`commit-changes`、`test-driven-development`、`systematic-debugging`、`manage-adr`、`project-kickoff` など）。`.claude/skills/` はここへのsymlinkでミラーされている
 - **docs/adr/**: Architecture Decision Records。`README.md` に運用ルール、`template.md` に作成用テンプレート、`0001`〜 の各ファイルが個別の決定記録。詳細は `manage-adr` skillを参照 
