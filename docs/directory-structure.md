@@ -35,17 +35,13 @@ This document outlines the directory structure of the project to help AI agents 
 │   └── env.js           # Environment variables validation
 ├── docs/                # Project documentation
 │   ├── directory-structure.md # This file
-│   ├── claude-code-workflow.md # Claude Code開発ワークフローガイド
-│   ├── quick-start.md / .en.md / .vi.md # Getting started guides
-│   ├── images/           # Documentation screenshots
+│   ├── screens/          # 画面仕様書
 │   └── adr/              # Architecture Decision Records
 │       ├── README.md     # ADR運用ルール
 │       ├── template.md   # ADR作成用テンプレート
 │       └── NNNN-*.md     # 個々のADR（例: 0001-use-bun-as-package-manager.md）
 ├── .agents/skills/       # Agent Skillsの実体（各エージェント用ディレクトリからsymlinkでミラー）
 ├── .claude/              # Claude Code設定（skills/ は .agents/skills/ へのsymlink、agents/, settings.json 等）
-├── .codex/               # Codex用設定（skills/ は .agents/skills/ へのsymlink）
-├── .cursor/               # Cursor用設定（skills/ は .agents/skills/ へのsymlink、rules/, mcp.json）
 ├── .github/              # GitHub設定（Issue/PRテンプレート、Dependabot、Actions、skills/ ミラー）
 ├── .next/               # Next.js build output (generated)
 ├── node_modules/        # Dependencies (generated)
@@ -59,11 +55,9 @@ This document outlines the directory structure of the project to help AI agents 
 ├── biome.jsonc           # Biome configuration
 ├── components.json      # shadcn/ui components configuration
 ├── lefthook.yml          # Git hooks configuration (pre-commit: format & typecheck)
-├── setup.command        # Mac setup script (double-click to run)
-├── setup.bat            # Windows setup script (double-click to run)
 ├── AGENTS.md             # AIエージェント向けリポジトリガイド
 ├── CLAUDE.md              # Claude Code設定・プロジェクト指示
-└── README.md             # Project overview and setup instructions（.en.md / .vi.md も同内容の多言語版）
+└── README.md             # Project overview and setup instructions
 ```
 
 ## Key Files
@@ -101,6 +95,5 @@ This document outlines the directory structure of the project to help AI agents 
 
 ## Agent Skills & Documentation
 
-- **.agents/skills/**: Agent Skillsの実体（`analyze-codebase`、`brainstorming`、`create-github-issue`、`create-github-pr`、`review-github-pr`、`commit-changes`、`test-driven-development`、`systematic-debugging`、`manage-adr`、`project-kickoff` など）。`.claude/`・`.github/`・`.cursor/`・`.codex/` 配下の `skills/` はここへのsymlinkでミラーされている
-- **docs/adr/**: Architecture Decision Records。`README.md` に運用ルール、`template.md` に作成用テンプレート、`0001`〜 の各ファイルが個別の決定記録。詳細は `docs/claude-code-workflow.md` および `manage-adr` skillを参照
-- **docs/claude-code-workflow.md**: Claude Code（Agent Skillsベース）を使った開発ワークフローガイド 
+- **.agents/skills/**: Agent Skillsの実体（`analyze-codebase`、`brainstorming`、`create-github-issue`、`create-github-pr`、`review-github-pr`、`commit-changes`、`test-driven-development`、`systematic-debugging`、`manage-adr`、`project-kickoff` など）。`.claude/`・`.github/` 配下の `skills/` はここへのsymlinkでミラーされている
+- **docs/adr/**: Architecture Decision Records。`README.md` に運用ルール、`template.md` に作成用テンプレート、`0001`〜 の各ファイルが個別の決定記録。詳細は `manage-adr` skillを参照 
