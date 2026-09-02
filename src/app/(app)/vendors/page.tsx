@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "~/components/ui/badge";
@@ -104,6 +104,7 @@ function parseCategories(categories: string | null): string[] {
 export default function VendorsPage() {
   const utils = api.useUtils();
   const { data: vendors, isLoading } = api.vendors.list.useQuery();
+  const { data: categories } = api.categories.list.useQuery();
   const [keyword, setKeyword] = useState("");
   const [editing, setEditing] = useState<VendorDetail | null>(null);
   const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null);
@@ -221,6 +222,7 @@ export default function VendorsPage() {
               <TableHead>部署名</TableHead>
               <TableHead>担当者名</TableHead>
               <TableHead>連絡先</TableHead>
+              <TableHead>所在地</TableHead>
               <TableHead>資本金</TableHead>
               <TableHead>企業規模</TableHead>
               <TableHead>対応工事区分</TableHead>
@@ -230,7 +232,7 @@ export default function VendorsPage() {
             {isLoading &&
               Array.from({ length: 5 }, (_, i) => (
                 <TableRow key={`skeleton-${i.toString()}`}>
-                  <TableCell colSpan={8}>
+                  <TableCell colSpan={9}>
                     <Skeleton className="h-6 w-full" />
                   </TableCell>
                 </TableRow>
@@ -239,7 +241,7 @@ export default function VendorsPage() {
               <TableRow>
                 <TableCell
                   className="text-center text-muted-foreground"
-                  colSpan={8}
+                  colSpan={9}
                 >
                   発注先が登録されていません
                 </TableCell>
@@ -266,6 +268,7 @@ export default function VendorsPage() {
                     )}
                   </div>
                 </TableCell>
+                <TableCell>{v.address || "-"}</TableCell>
                 <TableCell className="text-right tabular-nums">
                   {v.capital == null ? "-" : `¥${v.capital.toLocaleString()}`}
                 </TableCell>
@@ -294,7 +297,7 @@ export default function VendorsPage() {
           <DialogHeader>
             <DialogTitle>新規発注先登録</DialogTitle>
           </DialogHeader>
-          <VendorForm form={form} setForm={setForm} />
+          <VendorForm categories={categories} form={form} setForm={setForm} />
           <DialogFooter>
             <Button disabled={createMutation.isPending} onClick={submitCreate}>
               登録
@@ -311,7 +314,7 @@ export default function VendorsPage() {
           <DialogHeader>
             <DialogTitle>発注先情報を編集</DialogTitle>
           </DialogHeader>
-          <VendorForm form={form} setForm={setForm} />
+          <VendorForm categories={categories} form={form} setForm={setForm} />
           <DialogFooter className="justify-between sm:justify-between">
             <Button
               disabled={deleteMutation.isPending}
@@ -333,14 +336,30 @@ export default function VendorsPage() {
 }
 
 function VendorForm({
+  categories,
   form,
   setForm,
 }: {
+  categories: RouterOutputs["categories"]["list"] | undefined;
   form: FormState;
   setForm: (f: FormState) => void;
 }) {
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm({ ...form, [key]: value });
+
+  const [pendingCategory, setPendingCategory] = useState("");
+  const tags = parseCategories(form.categories);
+
+  const addTag = () => {
+    if (!pendingCategory || tags.includes(pendingCategory)) {
+      return;
+    }
+    set("categories", [...tags, pendingCategory].join(","));
+    setPendingCategory("");
+  };
+  const removeTag = (name: string) => {
+    set("categories", tags.filter((t) => t !== name).join(","));
+  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -413,12 +432,47 @@ function VendorForm({
           />
         </div>
         <div className="col-span-2 flex flex-col gap-2">
-          <Label>対応工事区分</Label>
-          <Input
-            onChange={(e) => set("categories", e.target.value)}
-            placeholder="カンマ区切りで入力（例: 電気工事, 内装工事）"
-            value={form.categories}
-          />
+          <Label>対応工事区分（タグ）</Label>
+          <div className="flex gap-2">
+            <Select onValueChange={setPendingCategory} value={pendingCategory}>
+              <SelectTrigger className="flex-1">
+                <SelectValue placeholder="表示する工事区分を指定..." />
+              </SelectTrigger>
+              <SelectContent>
+                {categories?.map((c) => (
+                  <SelectItem key={c.id} value={c.name}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button onClick={addTag} type="button" variant="outline">
+              <Plus data-icon="inline-start" />
+              追加
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {tags.length > 0 ? (
+              tags.map((t) => (
+                <Badge className="gap-1 pr-1" key={t} variant="secondary">
+                  #{t}
+                  <button
+                    aria-label={`${t}を削除`}
+                    className="rounded-full hover:text-destructive"
+                    onClick={() => removeTag(t)}
+                    type="button"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </Badge>
+              ))
+            ) : (
+              <span className="text-muted-foreground text-xs">タグ未設定</span>
+            )}
+          </div>
+          <p className="text-muted-foreground text-xs">
+            未指定の場合は全工事区分で選択候補に表示されます。タグを付けるとその工事区分でのみ候補に表示されます。
+          </p>
         </div>
       </div>
 

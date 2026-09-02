@@ -43,7 +43,11 @@ const ACTION_OPTIONS: { value: string; label: string }[] = [
 ];
 
 interface AuditLogDetails {
+  category?: string;
   changes?: string[];
+  company?: string;
+  email?: string;
+  invoiceNo?: string;
   name?: string;
 }
 
@@ -176,7 +180,15 @@ export default function HistoryPage() {
                 ? log.details
                 : undefined;
               const changes = details?.changes ?? [];
-              const target = details?.name || `#${log.recordId ?? "-"}`;
+              // 旧app（public/history.html）と同じフォールバック順：
+              // name → company → category → invoiceNo → email → #id
+              const target =
+                details?.name ||
+                details?.company ||
+                details?.category ||
+                details?.invoiceNo ||
+                details?.email ||
+                `#${log.recordId ?? "-"}`;
 
               return (
                 <TableRow key={log.id}>

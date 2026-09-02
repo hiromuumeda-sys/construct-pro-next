@@ -636,6 +636,352 @@ export async function getGrowthReportData(
   return { points, totalRevenue, totalProfit, from, to };
 }
 
+// ============ レポート分析（顧客別/発注先別 × 期間/案件）============
+// reporting.html の setReportType/setAggregateType/populateProjectModeFilters/
+// populateSecondaryFilter/generateCustomerReport/generateVendorReport/updateSummary/
+// renderDetailTable を移植。集計方法（期間 or 案件）とレポートタイプ（顧客別 or 発注先別）の
+// 2軸、および会社選択プルダウン／案件→発注先のカスケードフィルタ、平均粗利率等のサマリ、
+// サマリ根拠となる明細レコードを一括で返す。
+
+const REPORT_TYPES = ["customer", "vendor"] as const;
+const AGGREGATE_TYPES = ["period", "project"] as const;
+export type ReportType = (typeof REPORT_TYPES)[number];
+export type AggregateType = (typeof AGGREGATE_TYPES)[number];
+
+interface ReportFilterOption {
+  label: string;
+  value: string;
+}
+
+interface ReportGroupTotals {
+  cost: number;
+  profit: number;
+  revenue: number;
+}
+
+export interface ReportDetailRow {
+  category: string | null;
+  cost: number;
+  profit: number;
+  projectId: number;
+  projectName: string;
+  projectNo: string | null;
+  revenue: number;
+  vendor: string | null;
+}
+
+export interface AnalysisReportData {
+  dateEnd: string;
+  dateStart: string;
+  detail: ReportDetailRow[];
+  filters: {
+    companies: string[];
+    primaryOptions: ReportFilterOption[];
+    secondaryOptions: ReportFilterOption[];
+  };
+  summary: {
+    actualProfit: number;
+    avgGrossMargin: number;
+    expectedProfitMargin: number;
+    totalCost: number;
+    totalProfit: number;
+    totalRevenue: number;
+  };
+}
+
+/** reporting.html の `p.clientCompany || p.client` と同じ規則 */
+function companyOf(p: Pick<ProjectRow, "client" | "clientCompany">): string {
+  return p.clientCompany || p.client || "未設定";
+}
+
+function sortedDistinct(values: (string | null | undefined)[]): string[] {
+  return [...new Set(values.filter((v): v is string => Boolean(v)))].sort();
+}
+
+/** reporting.html の getDateRange() 相当：終了未指定=今日、開始未指定=3ヶ月前 */
+function resolvePeriodRange(
+  dateStart?: string,
+  dateEnd?: string
+): { dateEnd: string; dateStart: string } {
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const end = dateEnd || todayIso;
+  if (dateStart) {
+    return { dateStart, dateEnd: end };
+  }
+  const now = new Date();
+  const threeMonthsAgo = new Date(
+    now.getFullYear(),
+    now.getMonth() - 3,
+    now.getDate()
+  );
+  return {
+    dateStart: threeMonthsAgo.toISOString().slice(0, 10),
+    dateEnd: end,
+  };
+}
+
+/**
+ * 会社（顧客/発注先）選択プルダウン・カスケードフィルタの選択肢一覧。
+ * reporting.html の populateCompanySelect/populateProjectModeFilters/populateSecondaryFilter を移植。
+ * 期間集計＝会社プルダウンのみ、案件集計＝親(会社 or 案件)→子(案件 or 発注先)の2段カスケード。
+ */
+function buildReportFilterOptions(
+  reportType: ReportType,
+  aggregateType: AggregateType,
+  allProjects: ProjectRow[],
+  allOrders: OrderRow[],
+  primary?: string
+): AnalysisReportData["filters"] {
+  if (aggregateType === "period") {
+    const companies =
+      reportType === "customer"
+        ? sortedDistinct(allProjects.map(companyOf))
+        : sortedDistinct(allOrders.map((o) => o.vendor));
+    return { companies, primaryOptions: [], secondaryOptions: [] };
+  }
+
+  if (reportType === "customer") {
+    // 親=会社(顧客)、子=その会社が発注した案件
+    const primaryOptions = sortedDistinct(allProjects.map(companyOf)).map(
+      (c) => ({ value: c, label: c })
+    );
+    const scopedProjects = primary
+      ? allProjects.filter((p) => companyOf(p) === primary)
+      : allProjects;
+    const secondaryOptions = scopedProjects.map((p) => ({
+      value: String(p.id),
+      label: p.name,
+    }));
+    return { companies: [], primaryOptions, secondaryOptions };
+  }
+
+  // 親=案件、子=その案件を担当した発注先
+  const primaryOptions = allProjects.map((p) => ({
+    value: String(p.id),
+    label: p.name,
+  }));
+  const scopedOrders = primary
+    ? allOrders.filter((o) => o.projectId === Number(primary))
+    : allOrders;
+  const secondaryOptions = sortedDistinct(
+    scopedOrders.map((o) => o.vendor)
+  ).map((v) => ({ value: v, label: v }));
+  return { companies: [], primaryOptions, secondaryOptions };
+}
+
+/** reporting.html の updateSummary() を移植。平均粗利率はグループ単位の単純平均（売上加重ではない）。 */
+function buildReportSummary(
+  groups: ReportGroupTotals[]
+): AnalysisReportData["summary"] {
+  const totalRevenue = groups.reduce((s, g) => s + g.revenue, 0);
+  const totalCost = groups.reduce((s, g) => s + g.cost, 0);
+  const totalProfit = groups.reduce((s, g) => s + g.profit, 0);
+  const margins = groups.map((g) =>
+    g.revenue > 0 ? (g.profit / g.revenue) * 100 : 0
+  );
+  const avgGrossMargin =
+    margins.length > 0
+      ? margins.reduce((a, b) => a + b, 0) / margins.length
+      : 0;
+  const expectedProfitMargin =
+    totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
+  return {
+    totalRevenue,
+    totalCost,
+    totalProfit,
+    avgGrossMargin,
+    expectedProfitMargin,
+    actualProfit: totalProfit,
+  };
+}
+
+/** reporting.html の renderDetailTable() を移植。売上の大きい順。 */
+function buildReportDetailRows(
+  orders: OrderRow[],
+  projectById: Map<number, ProjectRow>
+): ReportDetailRow[] {
+  return orders
+    .map((o) => {
+      const project = projectById.get(o.projectId);
+      const revenue = Number(o.decided) || Number(o.planned) || 0;
+      const cost = Number(o.estimate) || 0;
+      return {
+        projectId: o.projectId,
+        projectNo: project?.projectNo ?? null,
+        projectName: project?.name ?? `案件#${o.projectId}`,
+        category: o.category,
+        vendor: o.vendor,
+        revenue,
+        cost,
+        profit: revenue - cost,
+      };
+    })
+    .sort((a, b) => b.revenue - a.revenue);
+}
+
+export interface AnalysisReportInput {
+  aggregateType: AggregateType;
+  company?: string;
+  dateEnd?: string;
+  dateStart?: string;
+  primary?: string;
+  reportType: ReportType;
+  secondary?: string;
+}
+
+interface ReportScope {
+  scopedOrders: OrderRow[];
+  scopedProjects: ProjectRow[];
+}
+
+/** 集計方法＝期間：期間内で絞り込み、会社選択プルダウンでさらに絞り込む */
+function scopeByPeriod(
+  input: AnalysisReportInput,
+  allProjects: ProjectRow[],
+  allOrders: OrderRow[],
+  dateStart: string,
+  dateEnd: string
+): ReportScope {
+  const inRange = (d: string | null) => !d || (d >= dateStart && d <= dateEnd);
+
+  // filterDataByDate: 開始日が無い案件は対象外（除外）。注文側は period_start が無ければ除外しない。
+  const dateFilteredProjects = allProjects.filter(
+    (p) => !!p.startDate && p.startDate >= dateStart && p.startDate <= dateEnd
+  );
+
+  if (input.reportType === "customer") {
+    const scopedProjects = input.company
+      ? dateFilteredProjects.filter((p) => companyOf(p) === input.company)
+      : dateFilteredProjects;
+    const idSet = new Set(scopedProjects.map((p) => p.id));
+    const scopedOrders = allOrders.filter(
+      (o) => idSet.has(o.projectId) && inRange(o.periodStart)
+    );
+    return { scopedProjects, scopedOrders };
+  }
+
+  const dateFilteredOrders = allOrders.filter((o) => inRange(o.periodStart));
+  const scopedOrders = input.company
+    ? dateFilteredOrders.filter((o) => o.vendor === input.company)
+    : dateFilteredOrders;
+  return { scopedProjects: allProjects, scopedOrders };
+}
+
+/** 集計方法＝案件：顧客別=会社→案件、発注先別=案件→発注先の2段カスケードで絞り込む */
+function scopeByProject(
+  input: AnalysisReportInput,
+  allProjects: ProjectRow[],
+  allOrders: OrderRow[]
+): ReportScope {
+  if (input.reportType === "customer") {
+    let scopedProjects = input.primary
+      ? allProjects.filter((p) => companyOf(p) === input.primary)
+      : allProjects;
+    if (input.secondary) {
+      const pid = Number(input.secondary);
+      scopedProjects = scopedProjects.filter((p) => p.id === pid);
+    }
+    const idSet = new Set(scopedProjects.map((p) => p.id));
+    const scopedOrders = allOrders.filter((o) => idSet.has(o.projectId));
+    return { scopedProjects, scopedOrders };
+  }
+
+  let scopedOrders = input.primary
+    ? allOrders.filter((o) => o.projectId === Number(input.primary))
+    : allOrders;
+  if (input.secondary) {
+    scopedOrders = scopedOrders.filter((o) => o.vendor === input.secondary);
+  }
+  return { scopedProjects: allProjects, scopedOrders };
+}
+
+/** 平均粗利率の算出に使うグループ集計。顧客別＝会社ごと、発注先別＝発注先ごと。 */
+function buildReportGroups(
+  reportType: ReportType,
+  scopedProjects: ProjectRow[],
+  scopedOrders: OrderRow[],
+  projectById: Map<number, ProjectRow>
+): ReportGroupTotals[] {
+  const map = new Map<string, ReportGroupTotals>();
+  const ensure = (key: string) => {
+    let g = map.get(key);
+    if (!g) {
+      g = { revenue: 0, cost: 0, profit: 0 };
+      map.set(key, g);
+    }
+    return g;
+  };
+
+  if (reportType === "customer") {
+    // 発注が無い会社も0件のグループとして残す（legacy の customerMap 初期化に合わせる）
+    for (const p of scopedProjects) {
+      ensure(companyOf(p));
+    }
+    for (const o of scopedOrders) {
+      const project = projectById.get(o.projectId);
+      if (!project) {
+        continue;
+      }
+      const g = ensure(companyOf(project));
+      g.revenue += Number(o.decided) || Number(o.planned) || 0;
+      g.cost += Number(o.estimate) || 0;
+    }
+  } else {
+    for (const o of scopedOrders) {
+      const g = ensure(o.vendor || "未設定");
+      g.revenue += Number(o.decided) || Number(o.planned) || 0;
+      g.cost += Number(o.estimate) || 0;
+    }
+  }
+
+  for (const g of map.values()) {
+    g.profit = g.revenue - g.cost;
+  }
+  return [...map.values()];
+}
+
+export async function getAnalysisReportData(
+  input: AnalysisReportInput
+): Promise<AnalysisReportData> {
+  const [allProjects, allOrders] = await Promise.all([
+    db.query.projects.findMany({ where: isNull(projects.deletedAt) }),
+    db.query.orders.findMany(),
+  ]);
+  const projectById = new Map(allProjects.map((p) => [p.id, p]));
+  const { dateStart, dateEnd } = resolvePeriodRange(
+    input.dateStart,
+    input.dateEnd
+  );
+
+  const { scopedProjects, scopedOrders } =
+    input.aggregateType === "period"
+      ? scopeByPeriod(input, allProjects, allOrders, dateStart, dateEnd)
+      : scopeByProject(input, allProjects, allOrders);
+
+  const groups = buildReportGroups(
+    input.reportType,
+    scopedProjects,
+    scopedOrders,
+    projectById
+  );
+
+  const filters = buildReportFilterOptions(
+    input.reportType,
+    input.aggregateType,
+    allProjects,
+    allOrders,
+    input.primary
+  );
+
+  return {
+    dateStart,
+    dateEnd,
+    filters,
+    summary: buildReportSummary(groups),
+    detail: buildReportDetailRows(scopedOrders, projectById),
+  };
+}
+
 export const dashboardRouter = createTRPCRouter({
   notifications: protectedProcedure.query(() => buildNotifications()),
 
@@ -651,4 +997,18 @@ export const dashboardRouter = createTRPCRouter({
         .optional()
     )
     .query(({ input }) => getGrowthReportData(input?.from, input?.to)),
+
+  analysisReport: protectedProcedure
+    .input(
+      z.object({
+        reportType: z.enum(REPORT_TYPES),
+        aggregateType: z.enum(AGGREGATE_TYPES),
+        dateStart: z.string().optional(),
+        dateEnd: z.string().optional(),
+        company: z.string().optional(),
+        primary: z.string().optional(),
+        secondary: z.string().optional(),
+      })
+    )
+    .query(({ input }) => getAnalysisReportData(input)),
 });

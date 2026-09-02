@@ -34,6 +34,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
 import { Textarea } from "~/components/ui/textarea";
 import {
+  PROJECT_STATUS_CLASS,
   RECEIPT_STATUS_CLASS,
   receiptRowHighlightClass,
   statusClass,
@@ -46,11 +47,57 @@ type ReceiptRow = RouterOutputs["receipts"]["list"][number];
 type MiscRow = RouterOutputs["receipts"]["misc"]["list"][number];
 
 const PAY_STATUS_OPTIONS = ["未入金", "一部入金", "入金済"] as const;
-const PROJECT_TABLE_COLUMN_COUNT = 14;
+const PROJECT_TABLE_COLUMN_COUNT = 16;
+const RECEIPTS_TABLE_COLUMN_COUNT = 6;
 const MISC_TABLE_COLUMN_COUNT = 9;
+const NUMERIC_ONLY_RE = /^\d+$/;
 
 function yen(n: number | null | undefined) {
   return `¥${(n ?? 0).toLocaleString()}`;
+}
+
+type SalesRowForFilter = Pick<
+  RouterOutputs["receipts"]["salesSummary"][number],
+  "client" | "dueDate" | "id" | "name" | "payStatus" | "projectNo"
+>;
+
+// 数字のみの入力は#（案件の一意なid）への完全一致とみなす。工事名は引渡月変更による
+// 複製で同名になり得るため、部分一致では対象を一意に絞り込めないことがある。
+function matchesReceiptKeyword(r: SalesRowForFilter, kw: string): boolean {
+  if (!kw) {
+    return true;
+  }
+  if (NUMERIC_ONLY_RE.test(kw)) {
+    return String(r.id) === kw;
+  }
+  return (
+    (r.name ?? "").toLowerCase().includes(kw) ||
+    (r.client ?? "").toLowerCase().includes(kw) ||
+    (r.projectNo ?? "").toLowerCase().includes(kw)
+  );
+}
+
+interface ReceiptFilters {
+  dueFrom: string;
+  dueTo: string;
+  keyword: string;
+  statusFilter: string;
+}
+
+function matchesReceiptFilters(
+  r: SalesRowForFilter,
+  f: ReceiptFilters
+): boolean {
+  if (f.statusFilter !== "all" && r.payStatus !== f.statusFilter) {
+    return false;
+  }
+  if (f.dueFrom && (!r.dueDate || r.dueDate < f.dueFrom)) {
+    return false;
+  }
+  if (f.dueTo && (!r.dueDate || r.dueDate > f.dueTo)) {
+    return false;
+  }
+  return matchesReceiptKeyword(r, f.keyword.trim().toLowerCase());
 }
 
 export default function ReceiptsPage() {
@@ -100,6 +147,7 @@ function ProjectReceiptsTab() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [dueFrom, setDueFrom] = useState("");
   const [dueTo, setDueTo] = useState("");
+  const [keyword, setKeyword] = useState("");
 
   const [historyProject, setHistoryProject] = useState<SalesRow | null>(null);
   const [registerProject, setRegisterProject] = useState<SalesRow | null>(null);
@@ -136,6 +184,11 @@ function ProjectReceiptsTab() {
     onError: () => toast.error("備考の更新に失敗しました"),
   });
 
+  const updateStatusMutation = api.projects.updateReceiptStatus.useMutation({
+    onSuccess: () => invalidateAll(),
+    onError: () => toast.error("ステータス更新に失敗しました"),
+  });
+
   const handleNotesBlur = (row: SalesRow) => {
     const draft = notesDraft[row.id];
     if (draft === undefined || draft === (row.receiptNotes ?? "")) {
@@ -148,19 +201,18 @@ function ProjectReceiptsTab() {
     if (!rows) {
       return [];
     }
-    return rows.filter((r) => {
-      if (statusFilter !== "all" && r.payStatus !== statusFilter) {
-        return false;
-      }
-      if (dueFrom && (!r.dueDate || r.dueDate < dueFrom)) {
-        return false;
-      }
-      if (dueTo && (!r.dueDate || r.dueDate > dueTo)) {
-        return false;
-      }
-      return true;
-    });
-  }, [rows, statusFilter, dueFrom, dueTo]);
+    return rows.filter((r) =>
+      matchesReceiptFilters(r, { statusFilter, dueFrom, dueTo, keyword })
+    );
+  }, [rows, statusFilter, dueFrom, dueTo, keyword]);
+
+  const receiptsByProject = useMemo(() => {
+    const map = new Map<number, SalesRow>();
+    for (const r of rows ?? []) {
+      map.set(r.id, r);
+    }
+    return map;
+  }, [rows]);
 
   const totals = useMemo(
     () =>
@@ -290,7 +342,13 @@ function ProjectReceiptsTab() {
             value={dueTo}
           />
         </div>
-        <Button className="ml-auto" onClick={exportCsv} variant="outline">
+        <Input
+          className="ml-auto w-64"
+          onChange={(e) => setKeyword(e.target.value)}
+          placeholder="案件ID・工事名・発注者で検索"
+          value={keyword}
+        />
+        <Button onClick={exportCsv} variant="outline">
           CSV出力
         </Button>
       </div>
@@ -302,7 +360,9 @@ function ProjectReceiptsTab() {
               <TableHead>案件ID</TableHead>
               <TableHead>発注者</TableHead>
               <TableHead>工事名</TableHead>
+              <TableHead>契約</TableHead>
               <TableHead>請求書発行状態</TableHead>
+              <TableHead>未完/入金日</TableHead>
               <TableHead className="text-right">請負金額</TableHead>
               <TableHead className="text-right">当月入金額</TableHead>
               <TableHead className="text-right">前月までの入金額</TableHead>
@@ -349,9 +409,21 @@ function ProjectReceiptsTab() {
                 <TableCell>{r.client || "-"}</TableCell>
                 <TableCell className="font-medium">{r.name || "-"}</TableCell>
                 <TableCell>
+                  <Badge
+                    className={statusClass(PROJECT_STATUS_CLASS, r.status)}
+                  >
+                    {r.status || "-"}
+                  </Badge>
+                </TableCell>
+                <TableCell>
                   <Badge variant={r.invoiceIssued ? "default" : "outline"}>
                     {r.invoiceIssued ? "発行済み" : "未発行"}
                   </Badge>
+                </TableCell>
+                <TableCell
+                  className={r.completed ? "tabular-nums" : "text-destructive"}
+                >
+                  {r.completed ? r.lastReceiptDate || "完成" : "未完"}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {yen(r.contractAmount)}
@@ -371,12 +443,29 @@ function ProjectReceiptsTab() {
                 <TableCell className="text-right tabular-nums">
                   {yen(r.advanceReceived)}
                 </TableCell>
-                <TableCell>
-                  <Badge
-                    className={statusClass(RECEIPT_STATUS_CLASS, r.payStatus)}
+                <TableCell onClick={(e) => e.stopPropagation()}>
+                  <Select
+                    onValueChange={(v) =>
+                      updateStatusMutation.mutate({ id: r.id, value: v })
+                    }
+                    value={r.payStatus}
                   >
-                    {r.payStatus}
-                  </Badge>
+                    <SelectTrigger
+                      className={cn(
+                        "w-28 border-transparent",
+                        statusClass(RECEIPT_STATUS_CLASS, r.payStatus)
+                      )}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PAY_STATUS_OPTIONS.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </TableCell>
                 <TableCell
                   className="max-w-48"
@@ -414,6 +503,63 @@ function ProjectReceiptsTab() {
                 </TableCell>
               </TableRow>
             ))}
+          </TableBody>
+        </Table>
+      </div>
+
+      <h2 className="font-bold text-lg">入金明細</h2>
+      <div className="overflow-x-auto rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>入金日</TableHead>
+              <TableHead>工事名</TableHead>
+              <TableHead className="text-right">入金額</TableHead>
+              <TableHead>対象月度</TableHead>
+              <TableHead>備考</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {(!allReceipts || allReceipts.length === 0) && (
+              <TableRow>
+                <TableCell
+                  className="text-center text-muted-foreground"
+                  colSpan={RECEIPTS_TABLE_COLUMN_COUNT}
+                >
+                  入金実績がありません
+                </TableCell>
+              </TableRow>
+            )}
+            {allReceipts?.map((r) => {
+              const project = r.projectId
+                ? receiptsByProject.get(r.projectId)
+                : undefined;
+              return (
+                <TableRow key={r.id}>
+                  <TableCell>{r.receivedDate || "-"}</TableCell>
+                  <TableCell>
+                    {project?.name ??
+                      (r.projectId ? `案件#${r.projectId}` : "-")}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {yen(r.amount)}
+                  </TableCell>
+                  <TableCell>{r.month || "-"}</TableCell>
+                  <TableCell>{r.memo || "-"}</TableCell>
+                  <TableCell>
+                    <Button
+                      disabled={deleteReceiptMutation.isPending}
+                      onClick={() => deleteReceiptMutation.mutate({ id: r.id })}
+                      size="icon-sm"
+                      variant="ghost"
+                    >
+                      <Trash2 />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>

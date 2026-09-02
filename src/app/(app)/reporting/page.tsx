@@ -6,6 +6,13 @@ import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select";
 import { Skeleton } from "~/components/ui/skeleton";
 import {
   Table,
@@ -17,10 +24,16 @@ import {
   TableRow,
 } from "~/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
-import { api, type RouterOutputs } from "~/trpc/react";
+import { api, type RouterInputs, type RouterOutputs } from "~/trpc/react";
 
 type Growth = RouterOutputs["dashboard"]["growth"];
+type AnalysisReportInput = RouterInputs["dashboard"]["analysisReport"];
+type ReportType = AnalysisReportInput["reportType"];
+type AggregateType = AnalysisReportInput["aggregateType"];
 type Order = RouterOutputs["orders"]["list"][number];
+
+// shadcn の Select は空文字列を value に取れないため、「全て」を表す番人値として使う
+const ALL_VALUE = "__all__";
 
 function yen(v: number | null | undefined) {
   return `¥${Math.round(v ?? 0).toLocaleString()}`;
@@ -28,6 +41,32 @@ function yen(v: number | null | undefined) {
 
 function pct(v: number | null | undefined) {
   return `${(v ?? 0).toFixed(1)}%`;
+}
+
+function SegmentedToggle<T extends string>({
+  onChange,
+  options,
+  value,
+}: {
+  onChange: (v: T) => void;
+  options: { label: string; value: T }[];
+  value: T;
+}) {
+  return (
+    <div className="inline-flex gap-1 rounded-lg bg-muted p-[3px]">
+      {options.map((opt) => (
+        <Button
+          key={opt.value}
+          onClick={() => onChange(opt.value)}
+          size="sm"
+          type="button"
+          variant={value === opt.value ? "default" : "ghost"}
+        >
+          {opt.label}
+        </Button>
+      ))}
+    </div>
+  );
 }
 
 export default function ReportingPage() {
@@ -163,17 +202,38 @@ function SummaryTab() {
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-md border">
+      <div className="flex items-center justify-between">
+        <h2 className="font-semibold text-sm">
+          案件別 予実・利益率（今月稼働）
+        </h2>
+        {!isLoading && data && (
+          <span className="text-muted-foreground text-xs">
+            {data.projectProfit.length}件
+            {data.projectProfit.length > 10 && "（スクロール）"}
+          </span>
+        )}
+      </div>
+      <div className="max-h-[440px] overflow-x-auto overflow-y-auto rounded-md border">
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead>案件ID</TableHead>
-              <TableHead>工事名</TableHead>
-              <TableHead>ステータス</TableHead>
-              <TableHead className="text-right">売上</TableHead>
-              <TableHead className="text-right">原価</TableHead>
-              <TableHead className="text-right">利益</TableHead>
-              <TableHead className="text-right">利益率</TableHead>
+            <TableRow className="bg-muted/50">
+              <TableHead className="sticky top-0 bg-muted/50">案件ID</TableHead>
+              <TableHead className="sticky top-0 bg-muted/50">工事名</TableHead>
+              <TableHead className="sticky top-0 bg-muted/50">
+                ステータス
+              </TableHead>
+              <TableHead className="sticky top-0 bg-muted/50 text-right">
+                売上
+              </TableHead>
+              <TableHead className="sticky top-0 bg-muted/50 text-right">
+                原価
+              </TableHead>
+              <TableHead className="sticky top-0 bg-muted/50 text-right">
+                利益
+              </TableHead>
+              <TableHead className="sticky top-0 bg-muted/50 text-right">
+                利益率
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -191,7 +251,7 @@ function SummaryTab() {
                   className="text-center text-muted-foreground"
                   colSpan={7}
                 >
-                  当月稼働中の案件がありません
+                  今月稼働中の案件はありません
                 </TableCell>
               </TableRow>
             )}
@@ -424,6 +484,269 @@ function GrowthTab() {
             })}
           </TableBody>
         </Table>
+      </div>
+
+      <ReportAnalysisSection />
+    </div>
+  );
+}
+
+function ReportAnalysisSection() {
+  const [reportType, setReportType] = useState<ReportType>("customer");
+  const [aggregateType, setAggregateType] = useState<AggregateType>("period");
+  const [dateStart, setDateStart] = useState("");
+  const [dateEnd, setDateEnd] = useState("");
+  const [company, setCompany] = useState(ALL_VALUE);
+  const [primary, setPrimary] = useState(ALL_VALUE);
+  const [secondary, setSecondary] = useState(ALL_VALUE);
+
+  const { data, isLoading } = api.dashboard.analysisReport.useQuery({
+    reportType,
+    aggregateType,
+    dateStart: dateStart || undefined,
+    dateEnd: dateEnd || undefined,
+    company: company === ALL_VALUE ? undefined : company,
+    primary: primary === ALL_VALUE ? undefined : primary,
+    secondary: secondary === ALL_VALUE ? undefined : secondary,
+  });
+
+  const changeReportType = (v: ReportType) => {
+    setReportType(v);
+    setCompany(ALL_VALUE);
+    setPrimary(ALL_VALUE);
+    setSecondary(ALL_VALUE);
+  };
+  const changeAggregateType = (v: AggregateType) => {
+    setAggregateType(v);
+    setCompany(ALL_VALUE);
+    setPrimary(ALL_VALUE);
+    setSecondary(ALL_VALUE);
+  };
+  const changePrimary = (v: string) => {
+    setPrimary(v);
+    setSecondary(ALL_VALUE);
+  };
+
+  const primaryLabel = reportType === "customer" ? "会社を選択" : "案件を選択";
+  const secondaryLabel =
+    reportType === "customer" ? "案件を選択" : "発注先を選択";
+
+  return (
+    <div className="flex flex-col gap-6">
+      <Card>
+        <CardContent className="flex flex-col gap-4 pt-6">
+          <div className="flex flex-wrap items-end gap-x-8 gap-y-3">
+            <div className="flex flex-col gap-1.5">
+              <p className="font-bold text-muted-foreground text-xs uppercase tracking-wider">
+                レポートタイプ
+              </p>
+              <SegmentedToggle
+                onChange={changeReportType}
+                options={[
+                  { value: "customer", label: "顧客別" },
+                  { value: "vendor", label: "発注先別" },
+                ]}
+                value={reportType}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <p className="font-bold text-muted-foreground text-xs uppercase tracking-wider">
+                集計方法
+              </p>
+              <SegmentedToggle
+                onChange={changeAggregateType}
+                options={[
+                  { value: "period", label: "期間" },
+                  { value: "project", label: "案件" },
+                ]}
+                value={aggregateType}
+              />
+            </div>
+          </div>
+
+          {aggregateType === "period" ? (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div className="flex flex-col gap-2">
+                <Label>期間開始</Label>
+                <Input
+                  onChange={(e) => setDateStart(e.target.value)}
+                  placeholder={data?.dateStart}
+                  type="date"
+                  value={dateStart}
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label>期間終了</Label>
+                <Input
+                  onChange={(e) => setDateEnd(e.target.value)}
+                  placeholder={data?.dateEnd}
+                  type="date"
+                  value={dateEnd}
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label>会社を選択</Label>
+                <Select onValueChange={setCompany} value={company}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_VALUE}>全社</SelectItem>
+                    {data?.filters.companies.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div className="flex flex-col gap-2">
+                <Label>{primaryLabel}</Label>
+                <Select onValueChange={changePrimary} value={primary}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_VALUE}>
+                      {reportType === "customer" ? "全社" : "全案件"}
+                    </SelectItem>
+                    {data?.filters.primaryOptions.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label>{secondaryLabel}</Label>
+                <Select onValueChange={setSecondary} value={secondary}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_VALUE}>
+                      {reportType === "customer" ? "全案件" : "全発注先"}
+                    </SelectItem>
+                    {data?.filters.secondaryOptions.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard
+          isLoading={isLoading}
+          label="売上合計"
+          value={yen(data?.summary.totalRevenue)}
+        />
+        <StatCard
+          isLoading={isLoading}
+          label="平均粗利率"
+          value={pct(data?.summary.avgGrossMargin)}
+        />
+        <StatCard
+          isLoading={isLoading}
+          label="想定利益率"
+          value={pct(data?.summary.expectedProfitMargin)}
+        />
+        <StatCard
+          isLoading={isLoading}
+          label="実利益合計"
+          value={yen(data?.summary.actualProfit)}
+        />
+      </div>
+
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="font-semibold text-sm">明細レコード（サマリ根拠）</h2>
+          {!isLoading && data && (
+            <span className="text-muted-foreground text-xs">
+              {data.detail.length}件
+              {data.detail.length > 15 && "（スクロール）"}
+            </span>
+          )}
+        </div>
+        <div className="max-h-[560px] overflow-x-auto overflow-y-auto rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/50">
+                <TableHead className="sticky top-0 bg-muted/50">
+                  案件ID
+                </TableHead>
+                <TableHead className="sticky top-0 bg-muted/50">
+                  案件名
+                </TableHead>
+                <TableHead className="sticky top-0 bg-muted/50">
+                  工事区分
+                </TableHead>
+                <TableHead className="sticky top-0 bg-muted/50">
+                  発注先
+                </TableHead>
+                <TableHead className="sticky top-0 bg-muted/50 text-right">
+                  売上
+                </TableHead>
+                <TableHead className="sticky top-0 bg-muted/50 text-right">
+                  原価
+                </TableHead>
+                <TableHead className="sticky top-0 bg-muted/50 text-right">
+                  利益
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading &&
+                Array.from({ length: 5 }, (_, i) => (
+                  <TableRow key={`skeleton-${i.toString()}`}>
+                    <TableCell colSpan={7}>
+                      <Skeleton className="h-6 w-full" />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              {!isLoading && (data?.detail.length ?? 0) === 0 && (
+                <TableRow>
+                  <TableCell
+                    className="text-center text-muted-foreground"
+                    colSpan={7}
+                  >
+                    該当するレコードがありません
+                  </TableCell>
+                </TableRow>
+              )}
+              {data?.detail.map((row, i) => (
+                <TableRow key={`${row.projectId}-${i.toString()}`}>
+                  <TableCell className="tabular-nums">
+                    {row.projectNo ?? "-"}
+                  </TableCell>
+                  <TableCell className="font-medium">
+                    {row.projectName}
+                  </TableCell>
+                  <TableCell>{row.category || "-"}</TableCell>
+                  <TableCell>{row.vendor || "-"}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {yen(row.revenue)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {yen(row.cost)}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {yen(row.profit)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       </div>
     </div>
   );

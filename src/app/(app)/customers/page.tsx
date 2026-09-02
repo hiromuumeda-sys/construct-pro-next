@@ -180,6 +180,7 @@ export default function CustomersPage() {
               <TableHead>担当者名</TableHead>
               <TableHead>メールアドレス</TableHead>
               <TableHead>電話番号</TableHead>
+              <TableHead>住所</TableHead>
               <TableHead>資本金</TableHead>
               <TableHead>企業規模（従業員数）</TableHead>
               <TableHead>サイト</TableHead>
@@ -189,7 +190,7 @@ export default function CustomersPage() {
             {isLoading &&
               Array.from({ length: 5 }, (_, i) => (
                 <TableRow key={`skeleton-${i.toString()}`}>
-                  <TableCell colSpan={9}>
+                  <TableCell colSpan={10}>
                     <Skeleton className="h-6 w-full" />
                   </TableCell>
                 </TableRow>
@@ -198,7 +199,7 @@ export default function CustomersPage() {
               <TableRow>
                 <TableCell
                   className="text-center text-muted-foreground"
-                  colSpan={9}
+                  colSpan={10}
                 >
                   顧客が登録されていません
                 </TableCell>
@@ -218,6 +219,7 @@ export default function CustomersPage() {
                 <TableCell>{c.contact || "-"}</TableCell>
                 <TableCell>{c.email || "-"}</TableCell>
                 <TableCell>{c.phone || "-"}</TableCell>
+                <TableCell>{c.address || "-"}</TableCell>
                 <TableCell className="text-right tabular-nums">
                   {c.capital == null ? "-" : `¥${c.capital.toLocaleString()}`}
                 </TableCell>

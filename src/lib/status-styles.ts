@@ -67,3 +67,33 @@ export function receiptRowHighlightClass(
     ? "bg-amber-50 hover:bg-amber-100/70 dark:bg-amber-950/20 dark:hover:bg-amber-950/30"
     : "";
 }
+
+/** 支払管理の一覧行ハイライト（未払い/部分払いの行を薄い黄色で強調、旧app踏襲） */
+export function paymentRowHighlightClass(
+  paymentStatus: string | null | undefined
+): string {
+  return paymentStatus === "未払い" || paymentStatus === "部分払い"
+    ? "bg-amber-50 hover:bg-amber-100/70 dark:bg-amber-950/20 dark:hover:bg-amber-950/30"
+    : "";
+}
+
+/**
+ * 工事計画の一覧行の状態（旧app buildOrderRow 相当）。
+ * - locked: ステータスが「支払済み」＝グレー表示・ステータス編集不可
+ * - invoiceSent: 請求書送付済み（未入金）＝黄色で目立たせる（locked時は優先しない）
+ */
+export function orderRowState(
+  status: string | null | undefined,
+  invoiceHasFile: boolean | null | undefined
+): { locked: boolean; invoiceSent: boolean; className: string } {
+  const locked = status === "支払済み";
+  const invoiceSent = Boolean(invoiceHasFile) && !locked;
+  let className = "";
+  if (locked) {
+    className = "bg-muted/60 text-muted-foreground/70";
+  } else if (invoiceSent) {
+    className =
+      "bg-amber-50 hover:bg-amber-100/70 dark:bg-amber-950/20 dark:hover:bg-amber-950/30";
+  }
+  return { locked, invoiceSent, className };
+}

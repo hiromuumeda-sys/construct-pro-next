@@ -1,7 +1,11 @@
 import { TRPCError } from "@trpc/server";
 import { asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { adminProcedure, createTRPCRouter } from "~/server/api/trpc";
+import {
+  adminProcedure,
+  createTRPCRouter,
+  protectedProcedure,
+} from "~/server/api/trpc";
 import { logAudit } from "~/server/audit/log";
 import { db } from "~/server/db";
 import { users } from "~/server/db/schema";
@@ -15,6 +19,14 @@ const VALID_ROLES = new Set(Object.keys(ROLE_LABELS));
 const VALID_STATUSES = new Set(["active", "suspended"]);
 
 export const usersRouter = createTRPCRouter({
+  // ログイン中のユーザー自身の情報。role別デフォルト（例：工事計画の表示項目の
+  // 原価情報デフォルト非表示）をクライアント側で判定するために使う軽量クエリ。
+  me: protectedProcedure.query(({ ctx }) => ({
+    id: ctx.user.id,
+    email: ctx.user.email,
+    role: ctx.user.role,
+  })),
+
   list: adminProcedure.query(() =>
     db
       .select({

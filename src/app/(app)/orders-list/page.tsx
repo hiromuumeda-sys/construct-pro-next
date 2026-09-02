@@ -1,12 +1,21 @@
 "use client";
 
-import { FileText, Plus, Send, Upload, X } from "lucide-react";
+import {
+  Columns3,
+  Download,
+  FileText,
+  Plus,
+  Send,
+  Upload,
+  X,
+} from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "~/components/ui/card";
+import { Checkbox } from "~/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -16,6 +25,11 @@ import {
 } from "~/components/ui/dialog";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "~/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -35,6 +49,7 @@ import {
 import { Textarea } from "~/components/ui/textarea";
 import {
   ORDER_STATUS_CLASS,
+  orderRowState,
   PROJECT_STATUS_CLASS,
   statusClass,
 } from "~/lib/status-styles";
@@ -46,6 +61,142 @@ type Project = RouterOutputs["projects"]["list"][number];
 
 const STATUSES = ["未処理", "見積待ち", "決定済み", "発注完了", "支払済み"];
 const NUMERIC_ONLY_RE = /^\d+$/;
+const CSV_NEEDS_QUOTING_RE = /[",\n]/;
+const CSV_QUOTE_RE = /"/g;
+const NOTES_EXCERPT_LEN = 20;
+
+// ===== 表示項目（権限別デフォルト＋チェックボックスで個別に表示/非表示） =====
+// 旧app orders-list.html の OPTIONAL_COLUMNS / defaultColumnState 相当。
+// 原価に近い見積額・予定金額は管理者／経理部のみ既定表示、それ以外（一般社員等）は
+// 既定非表示にする（role未確定の間も cost 系は非表示側に倒す＝安全側のデフォルト）。
+const OPTIONAL_COLUMNS = ["category", "notes", "estimate", "planned"] as const;
+type OptionalColumn = (typeof OPTIONAL_COLUMNS)[number];
+type ColumnState = Record<OptionalColumn, boolean>;
+
+function defaultColumnState(role: string | undefined): ColumnState {
+  const canSeeCost = role === "admin" || role === "accounting";
+  return {
+    category: true,
+    notes: true,
+    estimate: canSeeCost,
+    planned: canSeeCost,
+  };
+}
+
+function columnStorageKey(role: string | undefined): string {
+  return `orders-list-columns:${role ?? "user"}`;
+}
+
+function useColumnVisibility(role: string | undefined) {
+  const [state, setState] = useState<ColumnState>(() =>
+    defaultColumnState(role)
+  );
+  const appliedRoleRef = useRef<string | undefined | null>(null);
+
+  useEffect(() => {
+    if (appliedRoleRef.current === role) {
+      return;
+    }
+    appliedRoleRef.current = role;
+    try {
+      const saved = localStorage.getItem(columnStorageKey(role));
+      const parsed = saved ? (JSON.parse(saved) as Partial<ColumnState>) : null;
+      setState({ ...defaultColumnState(role), ...parsed });
+    } catch {
+      setState(defaultColumnState(role));
+    }
+  }, [role]);
+
+  const toggle = (key: OptionalColumn, checked: boolean) => {
+    setState((prev) => {
+      const next = { ...prev, [key]: checked };
+      try {
+        localStorage.setItem(columnStorageKey(role), JSON.stringify(next));
+      } catch {
+        /* noop：localStorage無効時は永続化のみ諦め、表示は継続する */
+      }
+      return next;
+    });
+  };
+
+  return { state, toggle };
+}
+
+function csvEscape(v: unknown): string {
+  const s = v === null || v === undefined ? "" : String(v);
+  return CSV_NEEDS_QUOTING_RE.test(s)
+    ? `"${s.replace(CSV_QUOTE_RE, '""')}"`
+    : s;
+}
+
+// 旧app orders-list.html exportOrdersCSV() の列構成をそのまま踏襲
+const ORDER_CSV_COLUMNS: [string, keyof Order][] = [
+  ["工事区分", "category"],
+  ["発注先", "vendor"],
+  ["見積額", "estimate"],
+  ["予定金額", "planned"],
+  ["決定金額", "decided"],
+  ["ステータス", "status"],
+  ["工事場所", "site"],
+  ["工事開始日", "periodStart"],
+  ["工事終了日", "periodEnd"],
+  ["検査・引渡時期", "handover"],
+  ["支払条件", "payment"],
+  ["支払状況", "paymentStatus"],
+  ["支払期日", "paymentDate"],
+  ["工事内容", "details"],
+];
+
+function exportOrdersCsv(
+  targetOrders: Order[],
+  projectName: string,
+  projectId: number
+) {
+  if (targetOrders.length === 0) {
+    toast.error("出力する工事計画データがありません");
+    return;
+  }
+  const header = ORDER_CSV_COLUMNS.map(([label]) => csvEscape(label)).join(",");
+  const body = targetOrders
+    .map((o) => ORDER_CSV_COLUMNS.map(([, key]) => csvEscape(o[key])).join(","))
+    .join("\n");
+  const blob = new Blob([`﻿${header}\n${body}\n`], {
+    type: "text/csv;charset=utf-8;",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `工事計画_${projectName || projectId}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/** 備考列の20文字抜粋（旧app buildOrderRow のnotes列相当）。 */
+function excerptNotes(details: string | null): string {
+  if (!details) {
+    return "-";
+  }
+  return details.length > NOTES_EXCERPT_LEN
+    ? `${details.slice(0, NOTES_EXCERPT_LEN)}…`
+    : details;
+}
+
+/** 発注先がその工事区分に対応するか。タグ未指定なら全工事区分で表示、1つでもあればその区分のみ（旧app vendorMatchesCategory 相当）。 */
+function vendorMatchesCategory(
+  v: { categories: string | null },
+  categoryName: string
+): boolean {
+  const tags = (v.categories ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (tags.length === 0) {
+    return true;
+  }
+  return Boolean(categoryName) && tags.includes(categoryName);
+}
 
 export default function OrdersListPage() {
   return (
@@ -137,6 +288,7 @@ function ProjectSelectView() {
               <TableHead>工事名</TableHead>
               <TableHead>発注元</TableHead>
               <TableHead>工期</TableHead>
+              <TableHead className="text-right">契約金額</TableHead>
               <TableHead>状態</TableHead>
             </TableRow>
           </TableHeader>
@@ -144,7 +296,7 @@ function ProjectSelectView() {
             {isLoading &&
               Array.from({ length: 5 }, (_, i) => (
                 <TableRow key={`sk-${i.toString()}`}>
-                  <TableCell colSpan={5}>
+                  <TableCell colSpan={6}>
                     <Skeleton className="h-6 w-full" />
                   </TableCell>
                 </TableRow>
@@ -153,7 +305,7 @@ function ProjectSelectView() {
               <TableRow>
                 <TableCell
                   className="text-center text-muted-foreground"
-                  colSpan={5}
+                  colSpan={6}
                 >
                   該当する案件がありません
                 </TableCell>
@@ -172,6 +324,9 @@ function ProjectSelectView() {
                 <TableCell>{p.client}</TableCell>
                 <TableCell>
                   {p.startDate || "-"} 〜 {p.endDate || "-"}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {p.amount == null ? "-" : `¥${p.amount.toLocaleString()}`}
                 </TableCell>
                 <TableCell>
                   <Badge
@@ -248,6 +403,8 @@ function OrderDetailView({ projectId }: { projectId: number }) {
   const { data: orders, isLoading } = api.orders.list.useQuery();
   const { data: categories } = api.categories.list.useQuery();
   const { data: vendors } = api.vendors.list.useQuery();
+  const { data: me } = api.users.me.useQuery();
+  const columns = useColumnVisibility(me?.role);
 
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -280,6 +437,12 @@ function OrderDetailView({ projectId }: { projectId: number }) {
     }
     return rows;
   }, [projectOrders, categoryFilter, statusFilter, keyword]);
+
+  // 固定列（発注先/決定金額/ステータス/請求書/請書/注文書）6列 + トグル可能な列
+  const visibleColumnCount = useMemo(
+    () => 6 + Object.values(columns.state).filter(Boolean).length,
+    [columns.state]
+  );
 
   const summary = useMemo(() => {
     const costTotal = projectOrders.reduce((s, o) => s + (o.decided ?? 0), 0);
@@ -400,7 +563,7 @@ function OrderDetailView({ projectId }: { projectId: number }) {
     if (!form.category) {
       return vendors;
     }
-    return vendors.filter((v) => (v.categories ?? "").includes(form.category));
+    return vendors.filter((v) => vendorMatchesCategory(v, form.category));
   }, [vendors, form.category]);
 
   return (
@@ -414,10 +577,21 @@ function OrderDetailView({ projectId }: { projectId: number }) {
               : `案件 #${projectId}`}
           </p>
         </div>
-        <Button onClick={openCreate}>
-          <Plus data-icon="inline-start" />
-          新規注文登録
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            onClick={() =>
+              exportOrdersCsv(projectOrders, project?.name ?? "", projectId)
+            }
+            variant="outline"
+          >
+            <Download data-icon="inline-start" />
+            CSV出力
+          </Button>
+          <Button onClick={openCreate}>
+            <Plus data-icon="inline-start" />
+            新規注文登録
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-4 gap-4">
@@ -491,21 +665,57 @@ function OrderDetailView({ projectId }: { projectId: number }) {
           </SelectContent>
         </Select>
         <Input
-          className="ml-auto w-64"
+          className="w-64"
           onChange={(e) => setKeyword(e.target.value)}
           placeholder="工事内容・発注先で検索"
           value={keyword}
         />
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button className="ml-auto" variant="outline">
+              <Columns3 data-icon="inline-start" />
+              表示項目
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-56">
+            <div className="flex flex-col gap-3">
+              {(
+                [
+                  ["category", "工事区分"],
+                  ["notes", "備考"],
+                  ["estimate", "見積額"],
+                  ["planned", "予定金額"],
+                ] as const
+              ).map(([key, label]) => (
+                <label
+                  className="flex items-center gap-2 text-sm"
+                  htmlFor={`col-toggle-${key}`}
+                  key={key}
+                >
+                  <Checkbox
+                    checked={columns.state[key]}
+                    id={`col-toggle-${key}`}
+                    onCheckedChange={(checked) =>
+                      columns.toggle(key, checked === true)
+                    }
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </PopoverContent>
+        </Popover>
       </div>
 
       <div className="overflow-x-auto rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>工事区分</TableHead>
+              {columns.state.category && <TableHead>工事区分</TableHead>}
               <TableHead>発注先</TableHead>
-              <TableHead>見積額</TableHead>
-              <TableHead>予定金額</TableHead>
+              {columns.state.notes && <TableHead>備考</TableHead>}
+              {columns.state.estimate && <TableHead>見積額</TableHead>}
+              {columns.state.planned && <TableHead>予定金額</TableHead>}
               <TableHead className="bg-amber-50">決定金額</TableHead>
               <TableHead>ステータス</TableHead>
               <TableHead>請求書</TableHead>
@@ -517,7 +727,7 @@ function OrderDetailView({ projectId }: { projectId: number }) {
             {isLoading &&
               Array.from({ length: 3 }, (_, i) => (
                 <TableRow key={`sk-${i.toString()}`}>
-                  <TableCell colSpan={9}>
+                  <TableCell colSpan={visibleColumnCount}>
                     <Skeleton className="h-6 w-full" />
                   </TableCell>
                 </TableRow>
@@ -526,77 +736,27 @@ function OrderDetailView({ projectId }: { projectId: number }) {
               <TableRow>
                 <TableCell
                   className="text-center text-muted-foreground"
-                  colSpan={9}
+                  colSpan={visibleColumnCount}
                 >
                   発注明細がありません
                 </TableCell>
               </TableRow>
             )}
             {filtered.map((o) => (
-              <TableRow className="cursor-pointer" key={o.id}>
-                <TableCell onClick={() => openEdit(o)}>
-                  {o.category || "-"}
-                </TableCell>
-                <TableCell onClick={() => openEdit(o)}>
-                  {o.vendor || "-"}
-                </TableCell>
-                <TableCell className="tabular-nums" onClick={() => openEdit(o)}>
-                  {o.estimate == null ? "-" : `¥${o.estimate.toLocaleString()}`}
-                </TableCell>
-                <TableCell className="tabular-nums" onClick={() => openEdit(o)}>
-                  {o.planned == null ? "-" : `¥${o.planned.toLocaleString()}`}
-                </TableCell>
-                <TableCell
-                  className="bg-amber-50 tabular-nums"
-                  onClick={() => openEdit(o)}
-                >
-                  {o.decided == null ? "-" : `¥${o.decided.toLocaleString()}`}
-                </TableCell>
-                <TableCell onClick={(e) => e.stopPropagation()}>
-                  <Select
-                    onValueChange={(v) =>
-                      updateStatusMutation.mutate({
-                        id: o.id,
-                        version: o.version,
-                        status: v,
-                      })
-                    }
-                    value={o.status ?? "未処理"}
-                  >
-                    <SelectTrigger
-                      className={cn(
-                        "w-32 border-transparent",
-                        statusClass(ORDER_STATUS_CLASS, o.status)
-                      )}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {STATUSES.map((s) => (
-                        <SelectItem key={s} value={s}>
-                          {s}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </TableCell>
-                <TableCell onClick={(e) => e.stopPropagation()}>
-                  <OrderFileCell kind="invoice" order={o} />
-                </TableCell>
-                <TableCell onClick={(e) => e.stopPropagation()}>
-                  <OrderFileCell kind="ack" order={o} />
-                </TableCell>
-                <TableCell onClick={(e) => e.stopPropagation()}>
-                  <Button
-                    onClick={() => setPoOrder(o)}
-                    size="sm"
-                    variant="outline"
-                  >
-                    <FileText data-icon="inline-start" />
-                    注文書
-                  </Button>
-                </TableCell>
-              </TableRow>
+              <OrderRow
+                columns={columns.state}
+                key={o.id}
+                onOpenEdit={() => openEdit(o)}
+                onOpenPo={() => setPoOrder(o)}
+                onStatusChange={(status) =>
+                  updateStatusMutation.mutate({
+                    id: o.id,
+                    version: o.version,
+                    status,
+                  })
+                }
+                order={o}
+              />
             ))}
           </TableBody>
         </Table>
@@ -660,6 +820,95 @@ function OrderDetailView({ projectId }: { projectId: number }) {
         />
       )}
     </div>
+  );
+}
+
+function OrderRow({
+  columns,
+  order: o,
+  onOpenEdit,
+  onOpenPo,
+  onStatusChange,
+}: {
+  columns: ColumnState;
+  order: Order;
+  onOpenEdit: () => void;
+  onOpenPo: () => void;
+  onStatusChange: (status: string) => void;
+}) {
+  const rowState = orderRowState(o.status, o.invoiceHasFile);
+  return (
+    <TableRow className={cn("cursor-pointer", rowState.className)}>
+      {columns.category && (
+        <TableCell onClick={onOpenEdit}>{o.category || "-"}</TableCell>
+      )}
+      <TableCell onClick={onOpenEdit}>{o.vendor || "-"}</TableCell>
+      {columns.notes && (
+        <TableCell
+          className="max-w-[220px] truncate"
+          onClick={onOpenEdit}
+          title={o.details ?? ""}
+        >
+          {excerptNotes(o.details)}
+        </TableCell>
+      )}
+      {columns.estimate && (
+        <TableCell className="tabular-nums" onClick={onOpenEdit}>
+          {o.estimate == null ? "-" : `¥${o.estimate.toLocaleString()}`}
+        </TableCell>
+      )}
+      {columns.planned && (
+        <TableCell className="tabular-nums" onClick={onOpenEdit}>
+          {o.planned == null ? "-" : `¥${o.planned.toLocaleString()}`}
+        </TableCell>
+      )}
+      <TableCell className="bg-amber-50 tabular-nums" onClick={onOpenEdit}>
+        {o.decided == null ? "-" : `¥${o.decided.toLocaleString()}`}
+      </TableCell>
+      <TableCell onClick={(e) => e.stopPropagation()}>
+        {rowState.locked ? (
+          <Badge
+            className={cn(
+              "opacity-70",
+              statusClass(ORDER_STATUS_CLASS, o.status)
+            )}
+            title="入金済みのため編集できません"
+          >
+            {o.status}
+          </Badge>
+        ) : (
+          <Select onValueChange={onStatusChange} value={o.status ?? "未処理"}>
+            <SelectTrigger
+              className={cn(
+                "w-32 border-transparent",
+                statusClass(ORDER_STATUS_CLASS, o.status)
+              )}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {STATUSES.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </TableCell>
+      <TableCell onClick={(e) => e.stopPropagation()}>
+        <OrderFileCell kind="invoice" order={o} />
+      </TableCell>
+      <TableCell onClick={(e) => e.stopPropagation()}>
+        <OrderFileCell kind="ack" order={o} />
+      </TableCell>
+      <TableCell onClick={(e) => e.stopPropagation()}>
+        <Button onClick={onOpenPo} size="sm" variant="outline">
+          <FileText data-icon="inline-start" />
+          注文書
+        </Button>
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -945,6 +1194,7 @@ function PurchaseOrderModal({
   const [emailBody, setEmailBody] = useState(
     "いつもお世話になっております。\n発注書を添付いたします。ご確認のほどよろしくお願いいたします。"
   );
+  const [attachAckFormat, setAttachAckFormat] = useState(false);
   const [sending, setSending] = useState(false);
 
   const ensureOrderNoMutation = api.orders.ensureOrderNo.useMutation({
@@ -980,6 +1230,7 @@ function PurchaseOrderModal({
           to: emailTo,
           subject: emailSubject,
           body: emailBody,
+          attachAckFormat,
         }),
       });
       const data = (await res.json()) as { error?: string };
@@ -1047,6 +1298,19 @@ function PurchaseOrderModal({
               onChange={(e) => setEmailBody(e.target.value)}
               value={emailBody}
             />
+            <label
+              className="flex items-center gap-2 text-sm"
+              htmlFor="po-attach-ack"
+            >
+              <Checkbox
+                checked={attachAckFormat}
+                id="po-attach-ack"
+                onCheckedChange={(checked) =>
+                  setAttachAckFormat(checked === true)
+                }
+              />
+              請書フォーマットを添付する
+            </label>
             <Button disabled={sending} onClick={sendEmail}>
               <Send data-icon="inline-start" />
               送信

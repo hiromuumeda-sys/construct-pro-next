@@ -31,11 +31,16 @@ import {
   TableRow,
 } from "~/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
-import { PAYMENT_STATUS_CLASS, statusClass } from "~/lib/status-styles";
+import {
+  PAYMENT_STATUS_CLASS,
+  paymentRowHighlightClass,
+  statusClass,
+} from "~/lib/status-styles";
 import { cn } from "~/lib/utils";
 import { api, type RouterOutputs } from "~/trpc/react";
 
 type Order = RouterOutputs["orders"]["list"][number];
+type Project = RouterOutputs["projects"]["list"][number];
 type PaymentRecord = RouterOutputs["payments"]["records"]["list"][number];
 type MiscPayment = RouterOutputs["payments"]["misc"]["list"][number];
 
@@ -44,9 +49,97 @@ const STATUS_FILTER_OPTIONS = ["すべて", ...PAYMENT_STATUSES] as const;
 
 const DUE_SOON_DAYS = 7;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const NUMERIC_ONLY_RE = /^\d+$/;
 
 function money(n: number | null | undefined): string {
   return `¥${(n ?? 0).toLocaleString()}`;
+}
+
+/**
+ * 発注先の口座番号を表示する専用ヘルパー。business-rules.md に明記の通り、
+ * 発注先マスタの一覧・vendors.list はマスク済み（下4桁のみ）を返すが、支払管理
+ * 画面だけは振込実行に実口座番号が必要なため、vendors.getById（編集画面用の非
+ * マスク経路）から取得したフルの口座番号をそのまま表示する。
+ */
+function useVendorBankInfo(vendorId: string | undefined) {
+  return api.vendors.getById.useQuery(
+    { id: vendorId ?? "" },
+    { enabled: Boolean(vendorId) }
+  );
+}
+
+function VendorBankInfoRows({ vendorId }: { vendorId: string | undefined }) {
+  const { data: vendor, isLoading } = useVendorBankInfo(vendorId);
+
+  if (!vendorId) {
+    return (
+      <p className="text-muted-foreground text-sm">
+        発注先が未設定のため振込先情報がありません
+      </p>
+    );
+  }
+  if (isLoading) {
+    return <Skeleton className="h-16 w-full" />;
+  }
+  return (
+    <div className="grid grid-cols-2 gap-2 text-sm">
+      <div>
+        <span className="text-muted-foreground">銀行名: </span>
+        {vendor?.bankName || "-"}
+      </div>
+      <div>
+        <span className="text-muted-foreground">支店名: </span>
+        {vendor?.bankBranch || "-"}
+      </div>
+      <div>
+        <span className="text-muted-foreground">種別・口座番号: </span>
+        {vendor?.bankType || vendor?.bankNumber
+          ? `${vendor?.bankType ?? ""} ${vendor?.bankNumber ?? ""}`.trim()
+          : "-"}
+      </div>
+      <div>
+        <span className="text-muted-foreground">口座名義: </span>
+        {vendor?.bankHolder || "-"}
+      </div>
+    </div>
+  );
+}
+
+/** 支払管理の一覧フィルタ判定（旧app filterTable 相当）。数字のみの入力は発注明細ID（#）への完全一致、それ以外は工事名/発注先/案件IDの部分一致とみなす。 */
+function matchesPaymentFilters(
+  o: Order,
+  project: Project | undefined,
+  filters: {
+    statusFilter: (typeof STATUS_FILTER_OPTIONS)[number];
+    dueFrom: string;
+    dueTo: string;
+    keyword: string;
+  }
+): boolean {
+  if (
+    filters.statusFilter !== "すべて" &&
+    (o.paymentStatus ?? "未払い") !== filters.statusFilter
+  ) {
+    return false;
+  }
+  if (filters.dueFrom && (!o.paymentDate || o.paymentDate < filters.dueFrom)) {
+    return false;
+  }
+  if (filters.dueTo && (!o.paymentDate || o.paymentDate > filters.dueTo)) {
+    return false;
+  }
+  const kw = filters.keyword.trim().toLowerCase();
+  if (!kw) {
+    return true;
+  }
+  if (NUMERIC_ONLY_RE.test(kw)) {
+    return String(o.id) === kw;
+  }
+  return (
+    (project?.name ?? "").toLowerCase().includes(kw) ||
+    (o.vendor ?? "").toLowerCase().includes(kw) ||
+    (project?.projectNo ?? "").toLowerCase().includes(kw)
+  );
 }
 
 function dueDateClass(dateStr: string | null | undefined): string {
@@ -102,31 +195,51 @@ function OrderPaymentsTab() {
   const utils = api.useUtils();
   const { data: orders, isLoading } = api.orders.list.useQuery();
   const { data: projects } = api.projects.list.useQuery();
+  const { data: vendors } = api.vendors.list.useQuery();
+  const { data: records } = api.payments.records.list.useQuery();
 
   const [statusFilter, setStatusFilter] =
     useState<(typeof STATUS_FILTER_OPTIONS)[number]>("すべて");
   const [dueFrom, setDueFrom] = useState("");
   const [dueTo, setDueTo] = useState("");
+  const [keyword, setKeyword] = useState("");
+  const [viewOrder, setViewOrder] = useState<Order | null>(null);
   const [historyOrder, setHistoryOrder] = useState<Order | null>(null);
   const [registerOrder, setRegisterOrder] = useState<Order | null>(null);
   const [notesDraft, setNotesDraft] = useState<Record<number, string>>({});
 
   const projectMap = useMemo(() => {
-    const m = new Map<number, RouterOutputs["projects"]["list"][number]>();
+    const m = new Map<number, Project>();
     for (const p of projects ?? []) {
       m.set(p.id, p);
     }
     return m;
   }, [projects]);
 
+  // 発注先名（denormalizeされた company 文字列）→ 発注先マスタID の対応表。
+  // 支払管理では口座番号をマスクしないため、vendors.getById を都度呼ぶ際のキーに使う。
+  const vendorIdByCompany = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const v of vendors ?? []) {
+      m.set(v.company, v.id);
+    }
+    return m;
+  }, [vendors]);
+
+  const invalidate = () =>
+    Promise.all([
+      utils.orders.list.invalidate(),
+      utils.payments.records.list.invalidate(),
+    ]);
+
   const updateMutation = api.orders.update.useMutation({
     onSuccess: async () => {
-      await utils.orders.list.invalidate();
+      await invalidate();
     },
     onError: (err) => {
       if (err.data?.code === "CONFLICT") {
         toast.error("他の人がこの発注を更新しました。再読み込みしてください");
-        utils.orders.list.invalidate();
+        invalidate();
         return;
       }
       toast.error("更新に失敗しました");
@@ -140,22 +253,15 @@ function OrderPaymentsTab() {
 
   const filtered = useMemo(
     () =>
-      purchaseOrders.filter((o) => {
-        if (
-          statusFilter !== "すべて" &&
-          (o.paymentStatus ?? "未払い") !== statusFilter
-        ) {
-          return false;
-        }
-        if (dueFrom && (!o.paymentDate || o.paymentDate < dueFrom)) {
-          return false;
-        }
-        if (dueTo && (!o.paymentDate || o.paymentDate > dueTo)) {
-          return false;
-        }
-        return true;
-      }),
-    [purchaseOrders, statusFilter, dueFrom, dueTo]
+      purchaseOrders.filter((o) =>
+        matchesPaymentFilters(o, projectMap.get(o.projectId), {
+          statusFilter,
+          dueFrom,
+          dueTo,
+          keyword,
+        })
+      ),
+    [purchaseOrders, statusFilter, dueFrom, dueTo, keyword, projectMap]
   );
 
   const handleStatusChange = (order: Order, status: string) => {
@@ -224,6 +330,15 @@ function OrderPaymentsTab() {
               value={dueTo}
             />
           </div>
+          <div className="flex flex-col gap-1">
+            <Label className="text-muted-foreground text-xs">検索</Label>
+            <Input
+              className="w-64"
+              onChange={(e) => setKeyword(e.target.value)}
+              placeholder="#ID・工事名・発注先で検索"
+              value={keyword}
+            />
+          </div>
         </div>
         <Button
           onClick={() => {
@@ -272,94 +387,52 @@ function OrderPaymentsTab() {
                 </TableCell>
               </TableRow>
             )}
-            {filtered.map((o) => {
-              const project = projectMap.get(o.projectId);
-              const notes = notesDraft[o.id] ?? o.paymentNotes ?? "";
-              return (
-                <TableRow key={o.id}>
-                  <TableCell className="tabular-nums">
-                    #{String(o.id).padStart(6, "0")}
-                  </TableCell>
-                  <TableCell>{project?.projectNo || "-"}</TableCell>
-                  <TableCell>{project?.name || "-"}</TableCell>
-                  <TableCell>{o.category || "-"}</TableCell>
-                  <TableCell>{o.vendor || "-"}</TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {money(o.decided)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {money(o.remaining ?? o.decided)}
-                  </TableCell>
-                  <TableCell className={dueDateClass(o.paymentDate)}>
-                    {o.paymentDate || "-"}
-                  </TableCell>
-                  <TableCell>
-                    <Select
-                      onValueChange={(v) => handleStatusChange(o, v)}
-                      value={o.paymentStatus ?? "未払い"}
-                    >
-                      <SelectTrigger
-                        className={cn(
-                          "w-32 border-transparent",
-                          statusClass(PAYMENT_STATUS_CLASS, o.paymentStatus)
-                        )}
-                        size="sm"
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PAYMENT_STATUSES.map((s) => (
-                          <SelectItem key={s} value={s}>
-                            {s}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      onClick={() => setHistoryOrder(o)}
-                      size="icon"
-                      variant="ghost"
-                    >
-                      <History className="size-4" />
-                    </Button>
-                  </TableCell>
-                  <TableCell>
-                    <Input
-                      className="w-40"
-                      onBlur={() => handleNotesBlur(o)}
-                      onChange={(e) =>
-                        setNotesDraft((prev) => ({
-                          ...prev,
-                          [o.id]: e.target.value,
-                        }))
-                      }
-                      value={notes}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Button onClick={() => setRegisterOrder(o)} size="sm">
-                      支払登録
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
+            {filtered.map((o) => (
+              <PaymentOrderRow
+                key={o.id}
+                notes={notesDraft[o.id] ?? o.paymentNotes ?? ""}
+                onNotesBlur={() => handleNotesBlur(o)}
+                onNotesChange={(v) =>
+                  setNotesDraft((prev) => ({ ...prev, [o.id]: v }))
+                }
+                onOpenHistory={() => setHistoryOrder(o)}
+                onOpenRegister={() => setRegisterOrder(o)}
+                onOpenView={() => setViewOrder(o)}
+                onStatusChange={(status) => handleStatusChange(o, status)}
+                order={o}
+                project={projectMap.get(o.projectId)}
+              />
+            ))}
           </TableBody>
         </Table>
       </div>
 
+      <PaymentRecordsSection records={records} />
+
+      <PaymentDetailModal
+        onOpenChange={(open) => !open && setViewOrder(null)}
+        order={viewOrder}
+        project={viewOrder ? projectMap.get(viewOrder.projectId) : undefined}
+        vendorId={
+          viewOrder ? vendorIdByCompany.get(viewOrder.vendor ?? "") : undefined
+        }
+      />
       <PaymentHistoryDialog
         onOpenChange={(open) => !open && setHistoryOrder(null)}
         order={historyOrder}
         project={
           historyOrder ? projectMap.get(historyOrder.projectId) : undefined
         }
+        records={records}
       />
       <PaymentRegisterDialog
         onOpenChange={(open) => !open && setRegisterOrder(null)}
         order={registerOrder}
+        vendorId={
+          registerOrder
+            ? vendorIdByCompany.get(registerOrder.vendor ?? "")
+            : undefined
+        }
       />
     </div>
   );
@@ -368,17 +441,15 @@ function OrderPaymentsTab() {
 function PaymentHistoryDialog({
   order,
   project,
+  records,
   onOpenChange,
 }: {
   order: Order | null;
-  project: RouterOutputs["projects"]["list"][number] | undefined;
+  project: Project | undefined;
+  records: PaymentRecord[] | undefined;
   onOpenChange: (open: boolean) => void;
 }) {
   const utils = api.useUtils();
-  const { data: records, isLoading } = api.payments.records.list.useQuery(
-    undefined,
-    { enabled: order !== null }
-  );
 
   const deleteMutation = api.payments.records.delete.useMutation({
     onSuccess: async () => {
@@ -407,8 +478,8 @@ function PaymentHistoryDialog({
           </DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-2">
-          {isLoading && <Skeleton className="h-24 w-full" />}
-          {!isLoading && filtered.length === 0 && (
+          {!records && <Skeleton className="h-24 w-full" />}
+          {records && filtered.length === 0 && (
             <p className="text-muted-foreground text-sm">
               支払履歴はありません
             </p>
@@ -442,9 +513,11 @@ function PaymentHistoryDialog({
 
 function PaymentRegisterDialog({
   order,
+  vendorId,
   onOpenChange,
 }: {
   order: Order | null;
+  vendorId: string | undefined;
   onOpenChange: (open: boolean) => void;
 }) {
   const utils = api.useUtils();
@@ -525,6 +598,12 @@ function PaymentRegisterDialog({
                 <span className="tabular-nums">{money(remaining)}</span>
               </div>
             </div>
+            <div className="rounded-md border p-3">
+              <p className="mb-2 font-medium text-muted-foreground text-xs">
+                振込先口座情報
+              </p>
+              <VendorBankInfoRows vendorId={vendorId} />
+            </div>
             <div className="flex flex-col gap-2">
               <Label>支払額</Label>
               <Input
@@ -572,6 +651,260 @@ function PaymentRegisterDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** 支払管理の一覧行（旧app renderPaymentRow 相当）。未払い/部分払いは黄色でハイライトし、行クリックで閲覧専用の支払明細モーダルを開く。 */
+function PaymentOrderRow({
+  order: o,
+  project,
+  notes,
+  onNotesChange,
+  onNotesBlur,
+  onOpenHistory,
+  onOpenRegister,
+  onOpenView,
+  onStatusChange,
+}: {
+  order: Order;
+  project: Project | undefined;
+  notes: string;
+  onNotesChange: (value: string) => void;
+  onNotesBlur: () => void;
+  onOpenHistory: () => void;
+  onOpenRegister: () => void;
+  onOpenView: () => void;
+  onStatusChange: (status: string) => void;
+}) {
+  return (
+    <TableRow
+      className={cn(
+        "cursor-pointer",
+        paymentRowHighlightClass(o.paymentStatus)
+      )}
+      onClick={onOpenView}
+    >
+      <TableCell className="tabular-nums">
+        #{String(o.id).padStart(6, "0")}
+      </TableCell>
+      <TableCell>{project?.projectNo || "-"}</TableCell>
+      <TableCell>{project?.name || "-"}</TableCell>
+      <TableCell>{o.category || "-"}</TableCell>
+      <TableCell>{o.vendor || "-"}</TableCell>
+      <TableCell className="text-right tabular-nums">
+        {money(o.decided)}
+      </TableCell>
+      <TableCell className="text-right tabular-nums">
+        {money(o.remaining ?? o.decided)}
+      </TableCell>
+      <TableCell className={dueDateClass(o.paymentDate)}>
+        {o.paymentDate || "-"}
+      </TableCell>
+      <TableCell onClick={(e) => e.stopPropagation()}>
+        <Select
+          onValueChange={onStatusChange}
+          value={o.paymentStatus ?? "未払い"}
+        >
+          <SelectTrigger
+            className={cn(
+              "w-32 border-transparent",
+              statusClass(PAYMENT_STATUS_CLASS, o.paymentStatus)
+            )}
+            size="sm"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PAYMENT_STATUSES.map((s) => (
+              <SelectItem key={s} value={s}>
+                {s}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </TableCell>
+      <TableCell onClick={(e) => e.stopPropagation()}>
+        <Button onClick={onOpenHistory} size="icon" variant="ghost">
+          <History className="size-4" />
+        </Button>
+      </TableCell>
+      <TableCell onClick={(e) => e.stopPropagation()}>
+        <Input
+          className="w-40"
+          onBlur={onNotesBlur}
+          onChange={(e) => onNotesChange(e.target.value)}
+          value={notes}
+        />
+      </TableCell>
+      <TableCell onClick={(e) => e.stopPropagation()}>
+        <Button onClick={onOpenRegister} size="sm">
+          支払登録
+        </Button>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+/** 支払明細の閲覧専用モーダル（旧app openModal 相当）。金額・ステータス・支払期日は工事計画側で管理するため編集不可、口座情報のみ business-rules.md の例外に従いマスクせず表示する。 */
+function PaymentDetailModal({
+  order,
+  project,
+  vendorId,
+  onOpenChange,
+}: {
+  order: Order | null;
+  project: Project | undefined;
+  vendorId: string | undefined;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog onOpenChange={onOpenChange} open={order !== null}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>支払明細</DialogTitle>
+        </DialogHeader>
+        {order && (
+          <div className="flex flex-col gap-3 text-sm">
+            <div>
+              <p className="text-muted-foreground text-xs">工事名</p>
+              <p className="font-bold">{project?.name || "-"}</p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-muted-foreground text-xs">工事区分</p>
+                <p>{order.category || "-"}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground text-xs">発注先</p>
+                <p>{order.vendor || "-"}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground text-xs">費用</p>
+                <p className="tabular-nums">{money(order.decided)}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground text-xs">支払期日</p>
+                <p className="tabular-nums">{order.paymentDate || "-"}</p>
+              </div>
+              <div className="col-span-2">
+                <p className="mb-1 text-muted-foreground text-xs">
+                  支払ステータス
+                </p>
+                <Badge
+                  className={statusClass(
+                    PAYMENT_STATUS_CLASS,
+                    order.paymentStatus
+                  )}
+                >
+                  {order.paymentStatus || "-"}
+                </Badge>
+              </div>
+            </div>
+            <div className="border-t pt-3">
+              <p className="text-muted-foreground text-xs">残金</p>
+              <p className="font-bold text-red-600 tabular-nums">
+                {money(order.remaining ?? order.decided)}
+              </p>
+            </div>
+            <div className="border-t pt-3">
+              <p className="mb-1 flex items-center gap-1 font-medium text-muted-foreground text-xs">
+                振込先口座情報
+              </p>
+              <VendorBankInfoRows vendorId={vendorId} />
+              <p className="mt-2 text-muted-foreground text-xs">
+                ※ 金額・ステータス・支払期日は「工事計画」で管理されます。
+              </p>
+            </div>
+          </div>
+        )}
+        <DialogFooter>
+          <Button onClick={() => onOpenChange(false)} variant="outline">
+            閉じる
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** 常設の支払明細（消し込み履歴）セクション。旧app renderPaymentRecords 相当で、全案件横断の支払登録履歴を常時表示する。 */
+function PaymentRecordsSection({
+  records,
+}: {
+  records: PaymentRecord[] | undefined;
+}) {
+  const utils = api.useUtils();
+  const deleteMutation = api.payments.records.delete.useMutation({
+    onSuccess: async () => {
+      await Promise.all([
+        utils.payments.records.list.invalidate(),
+        utils.orders.list.invalidate(),
+      ]);
+      toast.success("支払登録を取消しました");
+    },
+    onError: () => toast.error("取消に失敗しました"),
+  });
+
+  return (
+    <div className="flex flex-col gap-3">
+      <h2 className="font-bold text-lg">支払明細</h2>
+      <div className="overflow-x-auto rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>支払日</TableHead>
+              <TableHead>工事名</TableHead>
+              <TableHead>発注先</TableHead>
+              <TableHead className="text-right">支払額</TableHead>
+              <TableHead>備考</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {!records && (
+              <TableRow>
+                <TableCell colSpan={6}>
+                  <Skeleton className="h-6 w-full" />
+                </TableCell>
+              </TableRow>
+            )}
+            {records && records.length === 0 && (
+              <TableRow>
+                <TableCell
+                  className="text-center text-muted-foreground"
+                  colSpan={6}
+                >
+                  支払登録の履歴がありません
+                </TableCell>
+              </TableRow>
+            )}
+            {(records ?? []).map((r) => (
+              <TableRow key={r.id}>
+                <TableCell className="tabular-nums">
+                  {r.paidDate || "-"}
+                </TableCell>
+                <TableCell>{r.projectName || `案件#${r.orderId}`}</TableCell>
+                <TableCell>{r.vendor || "-"}</TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {money(r.amount)}
+                </TableCell>
+                <TableCell>{r.note || "-"}</TableCell>
+                <TableCell>
+                  <Button
+                    disabled={deleteMutation.isPending}
+                    onClick={() => deleteMutation.mutate({ id: r.id })}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    取消
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
   );
 }
 

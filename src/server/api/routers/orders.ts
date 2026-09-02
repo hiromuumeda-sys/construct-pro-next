@@ -8,8 +8,16 @@ import {
 } from "~/server/api/trpc";
 import { diffChanges, logAudit } from "~/server/audit/log";
 import { db } from "~/server/db";
-import { orderFiles, orders } from "~/server/db/schema";
+import { orderFiles, orders, paymentRecords } from "~/server/db/schema";
 import { ensureOrderNo, workId } from "~/server/orders/order-no";
+
+/** amount系フィールドの表示整形。server.js fmtVal 相当（金額は3桁区切り、無しは "(空)"）。 */
+function fmtVal(v: number | null | undefined): string {
+  if (v === null || v === undefined) {
+    return "(空)";
+  }
+  return v.toLocaleString();
+}
 
 const nonNegAmount = z.number().nonnegative().nullish();
 
@@ -195,33 +203,64 @@ export const ordersRouter = createTRPCRouter({
           )
         : eq(orders.id, input.id);
 
-      const result = await db
-        .update(orders)
-        .set({
-          ...mergeOrderFields(input, before),
-          status: newStatus,
-          orderNo,
-          version: sql`${orders.version} + 1`,
-        })
-        .where(whereClause)
-        .returning({
-          id: orders.id,
-          version: orders.version,
-          orderNo: orders.orderNo,
-        });
+      // 支払管理画面から支払ステータスを直接「支払済み」に変更した場合、残額が
+      // あれば server.js /api/payment-records POST・payments.records.create と
+      // 同じロジックで残額分の支払登録明細を自動作成し、残金を0にする（自動消込）。
+      // 工事計画の status（工事ステータス）とは別軸のフィールドのため、
+      // input.paymentStatus が明示的に送られてきた場合のみ発火する。
+      const curRemaining = before.remaining ?? before.decided ?? 0;
+      const autoSettle =
+        input.paymentStatus === "支払済み" &&
+        before.paymentStatus !== "支払済み" &&
+        curRemaining > 0;
 
-      if (result.length === 0) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "他の人がこの発注を更新しました。再読み込みしてください",
-        });
+      const result = await db.transaction(async (tx) => {
+        const updated = await tx
+          .update(orders)
+          .set({
+            ...mergeOrderFields(input, before),
+            status: newStatus,
+            orderNo,
+            version: sql`${orders.version} + 1`,
+            ...(autoSettle ? { remaining: 0 } : {}),
+          })
+          .where(whereClause)
+          .returning({
+            id: orders.id,
+            version: orders.version,
+            orderNo: orders.orderNo,
+          });
+
+        if (updated.length === 0) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "他の人がこの発注を更新しました。再読み込みしてください",
+          });
+        }
+
+        if (autoSettle) {
+          await tx.insert(paymentRecords).values({
+            orderId: input.id,
+            paidDate: new Date().toISOString().slice(0, 10),
+            amount: curRemaining,
+            note: "ステータスを支払済に変更",
+          });
+        }
+
+        return updated[0];
+      });
+
+      const changes = diffChanges("orders", before, input);
+      if (autoSettle) {
+        changes.push(
+          `支払登録 ¥${curRemaining.toLocaleString()}（残金 ${fmtVal(curRemaining)} → ${fmtVal(0)}）`
+        );
       }
-
       await logAudit(ctx.user.id, "UPDATE", "orders", input.id, {
         name: `${before.category || input.category || ""}（${before.vendor || input.vendor || ""}）`,
-        changes: diffChanges("orders", before, input),
+        changes,
       });
-      return result[0];
+      return result;
     }),
 
   delete: protectedProcedure
